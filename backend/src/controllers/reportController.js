@@ -1,0 +1,427 @@
+import Sale from '../models/Sale.js';
+import Purchase from '../models/Purchase.js';
+import InventoryItem from '../models/InventoryItem.js';
+import Customer from '../models/Customer.js';
+import { asyncHandler } from '../utils/asyncHandler.js';
+import { fromCents } from '../utils/money.js';
+import { resolveDateRange } from '../utils/dateRange.js';
+
+const NEAR_EXPIRY_DAYS = 30;
+
+// GET /api/reports/sales
+export const salesReport = asyncHandler(async (req, res) => {
+  const { start, end } = resolveDateRange(req.query);
+  const match = { status: 'completed', createdAt: { $gte: start, $lte: end } };
+
+  const [[agg], byDay, topByQty, topByRevenue, cashVsCredit, receivablesAgg] = await Promise.all([
+    Sale.aggregate([
+      { $match: match },
+      {
+        $group: {
+          _id: null,
+          totalSales: { $sum: '$totalCents' },
+          numberOfSales: { $sum: 1 },
+          itemsSold: { $sum: { $sum: '$items.quantity' } },
+          cashCollected: { $sum: '$paidAmountCents' },
+          creditSales: { $sum: '$balanceAddedCents' },
+        },
+      },
+    ]),
+    Sale.aggregate([
+      { $match: match },
+      {
+        $group: {
+          _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
+          revenue: { $sum: '$totalCents' },
+          count: { $sum: 1 },
+        },
+      },
+      { $sort: { _id: 1 } },
+    ]),
+    Sale.aggregate([
+      { $match: match },
+      { $unwind: '$items' },
+      { $group: { _id: '$items.itemName', quantity: { $sum: '$items.quantity' }, revenue: { $sum: '$items.subtotalCents' } } },
+      { $sort: { quantity: -1 } },
+      { $limit: 8 },
+    ]),
+    Sale.aggregate([
+      { $match: match },
+      { $unwind: '$items' },
+      { $group: { _id: '$items.itemName', quantity: { $sum: '$items.quantity' }, revenue: { $sum: '$items.subtotalCents' } } },
+      { $sort: { revenue: -1 } },
+      { $limit: 8 },
+    ]),
+    Sale.aggregate([
+      { $match: match },
+      { $group: { _id: null, cash: { $sum: '$paidAmountCents' }, credit: { $sum: '$balanceAddedCents' } } },
+    ]),
+    // Outstanding receivables is a current balance-sheet figure, not scoped to the date range.
+    Sale.aggregate([
+      { $match: { status: 'completed', outstandingCents: { $gt: 0 } } },
+      { $group: { _id: null, total: { $sum: '$outstandingCents' } } },
+    ]),
+  ]);
+
+  const totalSales = agg?.totalSales || 0;
+  const numberOfSales = agg?.numberOfSales || 0;
+
+  res.json({
+    success: true,
+    data: {
+      range: { from: start, to: end },
+      totalSales: fromCents(totalSales),
+      numberOfSales,
+      itemsSold: agg?.itemsSold || 0,
+      cashCollected: fromCents(agg?.cashCollected || 0),
+      creditSales: fromCents(agg?.creditSales || 0),
+      outstandingReceivables: fromCents(receivablesAgg[0]?.total || 0),
+      averageSaleValue: numberOfSales > 0 ? fromCents(Math.round(totalSales / numberOfSales)) : 0,
+      byDay: byDay.map((d) => ({ date: d._id, revenue: fromCents(d.revenue), count: d.count })),
+      topByQuantity: topByQty.map((d) => ({ name: d._id, quantity: d.quantity, revenue: fromCents(d.revenue) })),
+      topByRevenue: topByRevenue.map((d) => ({ name: d._id, quantity: d.quantity, revenue: fromCents(d.revenue) })),
+      cashVsCredit: {
+        cash: fromCents(cashVsCredit[0]?.cash || 0),
+        credit: fromCents(cashVsCredit[0]?.credit || 0),
+      },
+    },
+  });
+});
+
+// GET /api/reports/profit
+export const profitReport = asyncHandler(async (req, res) => {
+  const { start, end } = resolveDateRange(req.query);
+  const match = { status: 'completed', createdAt: { $gte: start, $lte: end } };
+
+  const [[agg], byDay, byItem, byCategory] = await Promise.all([
+    Sale.aggregate([
+      { $match: match },
+      {
+        $group: {
+          _id: null,
+          revenue: { $sum: '$totalCents' },
+          costOfGoodsSold: { $sum: '$costOfGoodsCents' },
+          grossProfit: { $sum: '$profitCents' },
+          unitsSold: { $sum: { $sum: '$items.quantity' } },
+        },
+      },
+    ]),
+    Sale.aggregate([
+      { $match: match },
+      {
+        $group: {
+          _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
+          revenue: { $sum: '$totalCents' },
+          cost: { $sum: '$costOfGoodsCents' },
+          profit: { $sum: '$profitCents' },
+        },
+      },
+      { $sort: { _id: 1 } },
+    ]),
+    Sale.aggregate([
+      { $match: match },
+      { $unwind: '$items' },
+      {
+        $group: {
+          _id: { itemId: '$items.item', itemName: '$items.itemName' },
+          revenue: { $sum: '$items.subtotalCents' },
+          cost: { $sum: { $multiply: ['$items.quantity', '$items.costPriceCents'] } },
+        },
+      },
+      { $addFields: { profit: { $subtract: ['$revenue', '$cost'] } } },
+      { $sort: { profit: -1 } },
+    ]),
+    Sale.aggregate([
+      { $match: match },
+      { $unwind: '$items' },
+      {
+        $lookup: { from: 'inventoryitems', localField: 'items.item', foreignField: '_id', as: 'itemDoc' },
+      },
+      { $addFields: { category: { $ifNull: [{ $arrayElemAt: ['$itemDoc.category', 0] }, 'Uncategorized'] } } },
+      {
+        $group: {
+          _id: '$category',
+          revenue: { $sum: '$items.subtotalCents' },
+          cost: { $sum: { $multiply: ['$items.quantity', '$items.costPriceCents'] } },
+        },
+      },
+      { $addFields: { profit: { $subtract: ['$revenue', '$cost'] } } },
+      { $sort: { profit: -1 } },
+    ]),
+  ]);
+
+  const revenue = agg?.revenue || 0;
+  const grossProfit = agg?.grossProfit || 0;
+  const profitByItem = byItem.map((d) => ({
+    itemId: d._id.itemId,
+    name: d._id.itemName,
+    revenue: fromCents(d.revenue),
+    cost: fromCents(d.cost),
+    profit: fromCents(d.profit),
+    marginPct: d.revenue > 0 ? Math.round((d.profit / d.revenue) * 1000) / 10 : 0,
+  }));
+
+  res.json({
+    success: true,
+    data: {
+      range: { from: start, to: end },
+      revenue: fromCents(revenue),
+      costOfGoodsSold: fromCents(agg?.costOfGoodsSold || 0),
+      grossProfit: fromCents(grossProfit),
+      grossMarginPct: revenue > 0 ? Math.round((grossProfit / revenue) * 1000) / 10 : 0,
+      unitsSold: agg?.unitsSold || 0,
+      byDay: byDay.map((d) => ({ date: d._id, revenue: fromCents(d.revenue), cost: fromCents(d.cost), profit: fromCents(d.profit) })),
+      profitByItem,
+      topProfitItems: profitByItem.slice(0, 10),
+      lowestProfitItems: [...profitByItem].reverse().slice(0, 10),
+      lossItems: profitByItem.filter((i) => i.profit < 0),
+      profitByCategory: byCategory.map((d) => ({
+        category: d._id,
+        revenue: fromCents(d.revenue),
+        cost: fromCents(d.cost),
+        profit: fromCents(d.profit),
+      })),
+    },
+  });
+});
+
+// GET /api/reports/profit/items/:itemId -- drill-down: which invoices produced this item's profit
+export const profitByItemDrilldown = asyncHandler(async (req, res) => {
+  const { start, end } = resolveDateRange(req.query);
+  const itemId = req.params.itemId;
+
+  const sales = await Sale.find({
+    status: 'completed',
+    createdAt: { $gte: start, $lte: end },
+    'items.item': itemId,
+  })
+    .sort({ createdAt: -1 })
+    .select('receiptNumber createdAt items customerName');
+
+  const rows = [];
+  for (const sale of sales) {
+    for (const line of sale.items) {
+      if (String(line.item) !== String(itemId)) continue;
+      rows.push({
+        saleId: sale._id,
+        receiptNumber: sale.receiptNumber,
+        customerName: sale.customerName,
+        createdAt: sale.createdAt,
+        quantity: line.quantity,
+        revenue: fromCents(line.subtotalCents),
+        cost: fromCents(line.quantity * line.costPriceCents),
+        profit: fromCents(line.subtotalCents - line.quantity * line.costPriceCents),
+      });
+    }
+  }
+
+  res.json({ success: true, data: { itemId, range: { from: start, to: end }, invoices: rows } });
+});
+
+// GET /api/reports/inventory
+export const inventoryReport = asyncHandler(async (req, res) => {
+  const [valueAgg, byCategory, mostStocked, mostValuable] = await Promise.all([
+    InventoryItem.aggregate([
+      {
+        $group: {
+          _id: null,
+          stockValueAtCost: { $sum: { $multiply: ['$quantity', '$costPriceCents'] } },
+          stockValueAtSelling: { $sum: { $multiply: ['$quantity', '$sellingPriceCents'] } },
+          totalItems: { $sum: 1 },
+          totalQuantity: { $sum: '$quantity' },
+        },
+      },
+    ]),
+    InventoryItem.aggregate([
+      {
+        $group: {
+          _id: '$category',
+          costValue: { $sum: { $multiply: ['$quantity', '$costPriceCents'] } },
+          sellingValue: { $sum: { $multiply: ['$quantity', '$sellingPriceCents'] } },
+        },
+      },
+      { $sort: { costValue: -1 } },
+    ]),
+    InventoryItem.find().sort({ quantity: -1 }).limit(8).select('name quantity'),
+    InventoryItem.aggregate([
+      { $addFields: { stockValue: { $multiply: ['$quantity', '$costPriceCents'] } } },
+      { $sort: { stockValue: -1 } },
+      { $limit: 8 },
+      { $project: { name: 1, stockValue: 1 } },
+    ]),
+  ]);
+
+  const cutoff = new Date(Date.now() + NEAR_EXPIRY_DAYS * 86400000);
+  const [lowStock, outOfStock, expired, nearExpiry] = await Promise.all([
+    InventoryItem.find({
+      $expr: { $and: [{ $gt: ['$quantity', 0] }, { $lte: ['$quantity', '$lowStockThreshold'] }] },
+    }).select('name sku quantity lowStockThreshold'),
+    InventoryItem.find({ quantity: { $lte: 0 } }).select('name sku quantity'),
+    InventoryItem.find({ expiryDate: { $ne: null, $lt: new Date() } }).select('name sku quantity expiryDate'),
+    InventoryItem.find({ expiryDate: { $ne: null, $gte: new Date(), $lte: cutoff } }).select(
+      'name sku quantity expiryDate'
+    ),
+  ]);
+
+  const stockValueAtCost = valueAgg[0]?.stockValueAtCost || 0;
+  const stockValueAtSelling = valueAgg[0]?.stockValueAtSelling || 0;
+
+  res.json({
+    success: true,
+    data: {
+      stockValueAtCost: fromCents(stockValueAtCost),
+      stockValueAtSelling: fromCents(stockValueAtSelling),
+      potentialGrossProfit: fromCents(stockValueAtSelling - stockValueAtCost),
+      totalItems: valueAgg[0]?.totalItems || 0,
+      totalQuantity: valueAgg[0]?.totalQuantity || 0,
+      lowStock,
+      outOfStock,
+      expired,
+      nearExpiry,
+      valueByCategory: byCategory.map((c) => ({
+        category: c._id || 'Uncategorized',
+        costValue: fromCents(c.costValue),
+        sellingValue: fromCents(c.sellingValue),
+      })),
+      mostStockedItems: mostStocked.map((i) => ({ name: i.name, quantity: i.quantity })),
+      mostValuableItems: mostValuable.map((i) => ({ name: i.name, stockValue: fromCents(i.stockValue) })),
+      stockDistribution: {
+        healthy: valueAgg[0]?.totalItems ? valueAgg[0].totalItems - lowStock.length - outOfStock.length : 0,
+        lowStock: lowStock.length,
+        outOfStock: outOfStock.length,
+      },
+    },
+  });
+});
+
+// GET /api/reports/customers -- debt overview across all customers (used by
+// Seller/POS debt tools, intentionally not part of the main Reports nav)
+export const customersReport = asyncHandler(async (req, res) => {
+  const customers = await Customer.find({ balanceCents: { $ne: 0 } })
+    .sort({ balanceCents: -1 })
+    .select('name phone balanceCents totalPurchasedCents totalPaidCents');
+
+  const [debtAgg] = await Customer.aggregate([
+    { $match: { balanceCents: { $gt: 0 } } },
+    { $group: { _id: null, totalDebt: { $sum: '$balanceCents' } } },
+  ]);
+
+  res.json({
+    success: true,
+    data: {
+      totalOutstandingDebt: fromCents(debtAgg?.totalDebt || 0),
+      customers: customers.map((c) => ({
+        id: c._id,
+        name: c.name,
+        phone: c.phone,
+        balance: fromCents(c.balanceCents),
+        totalPurchased: fromCents(c.totalPurchasedCents),
+        totalPaid: fromCents(c.totalPaidCents),
+      })),
+    },
+  });
+});
+
+// GET /api/reports/purchases
+export const purchasesReport = asyncHandler(async (req, res) => {
+  const { start, end } = resolveDateRange(req.query);
+  const match = { status: 'completed', createdAt: { $gte: start, $lte: end } };
+
+  const [[agg], bySupplier, byProduct, mostPurchased, supplierCount] = await Promise.all([
+    Purchase.aggregate([
+      { $match: match },
+      { $group: { _id: null, totalPurchases: { $sum: '$totalCostCents' }, count: { $sum: 1 }, units: { $sum: { $sum: '$items.quantity' } } } },
+    ]),
+    Purchase.aggregate([
+      { $match: match },
+      { $group: { _id: '$supplierName', spent: { $sum: '$totalCostCents' }, purchases: { $sum: 1 } } },
+      { $sort: { spent: -1 } },
+    ]),
+    Purchase.aggregate([
+      { $match: match },
+      { $unwind: '$items' },
+      { $group: { _id: '$items.itemName', spent: { $sum: '$items.subtotalCents' }, quantity: { $sum: '$items.quantity' } } },
+      { $sort: { spent: -1 } },
+      { $limit: 8 },
+    ]),
+    Purchase.aggregate([
+      { $match: match },
+      { $unwind: '$items' },
+      { $group: { _id: '$items.itemName', quantity: { $sum: '$items.quantity' } } },
+      { $sort: { quantity: -1 } },
+      { $limit: 8 },
+    ]),
+    Purchase.distinct('supplier', match),
+  ]);
+
+  const totalPurchases = agg?.totalPurchases || 0;
+  const count = agg?.count || 0;
+
+  res.json({
+    success: true,
+    data: {
+      range: { from: start, to: end },
+      totalPurchases: fromCents(totalPurchases),
+      numberOfPurchases: count,
+      unitsPurchased: agg?.units || 0,
+      numberOfSuppliers: supplierCount.length,
+      averagePurchaseValue: count > 0 ? fromCents(Math.round(totalPurchases / count)) : 0,
+      bySupplier: bySupplier.map((s) => ({ supplier: s._id, spent: fromCents(s.spent), purchases: s.purchases })),
+      byProduct: byProduct.map((p) => ({ name: p._id, spent: fromCents(p.spent), quantity: p.quantity })),
+      mostPurchasedItems: mostPurchased.map((p) => ({ name: p._id, quantity: p.quantity })),
+    },
+  });
+});
+
+// GET /api/reports/item-profit/:itemId
+// Answers: "did purchasing this product generate profit, accounting for what
+// has actually sold vs. what is still sitting in stock?"
+export const itemProfitReport = asyncHandler(async (req, res) => {
+  const item = await InventoryItem.findById(req.params.itemId);
+  if (!item) return res.status(404).json({ success: false, message: 'Item not found.' });
+
+  const [purchaseAgg] = await Purchase.aggregate([
+    { $match: { status: 'completed' } },
+    { $unwind: '$items' },
+    { $match: { 'items.item': item._id } },
+    { $group: { _id: null, quantityPurchased: { $sum: '$items.quantity' }, totalCost: { $sum: '$items.subtotalCents' } } },
+  ]);
+
+  const [saleAgg] = await Sale.aggregate([
+    { $match: { status: 'completed' } },
+    { $unwind: '$items' },
+    { $match: { 'items.item': item._id } },
+    {
+      $group: {
+        _id: null,
+        quantitySold: { $sum: '$items.quantity' },
+        revenue: { $sum: '$items.subtotalCents' },
+        costOfGoodsSold: { $sum: { $multiply: ['$items.quantity', '$items.costPriceCents'] } },
+      },
+    },
+  ]);
+
+  const quantityPurchased = purchaseAgg?.quantityPurchased || 0;
+  const purchaseCost = fromCents(purchaseAgg?.totalCost || 0);
+  const quantitySold = saleAgg?.quantitySold || 0;
+  const revenue = fromCents(saleAgg?.revenue || 0);
+  const costOfGoodsSold = fromCents(saleAgg?.costOfGoodsSold || 0);
+  const grossProfit = revenue - costOfGoodsSold;
+  const remainingStock = item.quantity;
+  const remainingStockValue = fromCents(item.quantity * item.costPriceCents);
+
+  res.json({
+    success: true,
+    data: {
+      item: { id: item._id, name: item.name, sku: item.sku },
+      quantityPurchased,
+      purchaseCost,
+      quantitySold,
+      revenue,
+      costOfGoodsSold,
+      grossProfit,
+      remainingStock,
+      remainingStockValue,
+    },
+  });
+});
