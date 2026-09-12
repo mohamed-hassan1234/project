@@ -527,7 +527,7 @@ function SimpleItemTable({ rows, extraLabel, extraKey, isDate }) {
       <THead>
         <tr>
           <Th>Item</Th>
-          <Th>SKU</Th>
+          <Th>Item ID</Th>
           <Th>Quantity</Th>
           {extraLabel && <Th>{extraLabel}</Th>}
         </tr>
@@ -539,7 +539,7 @@ function SimpleItemTable({ rows, extraLabel, extraKey, isDate }) {
           rows.map((r) => (
             <tr key={r._id}>
               <Td>{r.name}</Td>
-              <Td>{r.sku || '—'}</Td>
+              <Td>{r.itemCode || '—'}</Td>
               <Td>{r.quantity}</Td>
               {extraLabel && <Td>{isDate ? formatDate(r[extraKey]) : r[extraKey]}</Td>}
             </tr>

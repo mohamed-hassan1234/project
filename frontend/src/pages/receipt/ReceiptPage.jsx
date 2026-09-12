@@ -1,28 +1,19 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { Printer, ArrowLeft, Ban } from 'lucide-react';
+import { Printer, ArrowLeft } from 'lucide-react';
 import client from '../../api/client.js';
-import { useAuth } from '../../context/AuthContext.jsx';
-import { useToast } from '../../context/ToastContext.jsx';
 import { formatCurrency, formatDate, formatTime } from '../../utils/format.js';
 import { printA5 } from '../../utils/printA5.js';
 import { BUSINESS } from '../../constants/business.js';
 import { PageSpinner } from '../../components/ui/Spinner.jsx';
 import Button from '../../components/ui/Button.jsx';
 import Badge from '../../components/ui/Badge.jsx';
-import Modal from '../../components/ui/Modal.jsx';
-import { FormField, Input } from '../../components/ui/Field.jsx';
 import logo from '../../images/logo.png';
 
 export default function ReceiptPage() {
   const { id } = useParams();
-  const { user } = useAuth();
-  const toast = useToast();
   const [sale, setSale] = useState(null);
   const [error, setError] = useState('');
-  const [voidOpen, setVoidOpen] = useState(false);
-  const [voidReason, setVoidReason] = useState('');
-  const [voiding, setVoiding] = useState(false);
 
   const load = useCallback(() => {
     client
@@ -32,23 +23,6 @@ export default function ReceiptPage() {
   }, [id]);
 
   useEffect(() => load(), [load]);
-
-  const canVoid = user?.role === 'admin' || user?.role === 'manager';
-
-  const handleVoid = async () => {
-    setVoiding(true);
-    try {
-      await client.post(`/sales/${id}/void`, { reason: voidReason });
-      toast.success('Sale voided. Stock and customer balance have been reversed.');
-      setVoidOpen(false);
-      setVoidReason('');
-      load();
-    } catch (err) {
-      toast.error(err.friendlyMessage || 'Could not void this sale.');
-    } finally {
-      setVoiding(false);
-    }
-  };
 
   if (error) return <div className="rounded-lg bg-rose-50 p-4 text-sm text-rose-700">{error}</div>;
   if (!sale) return <PageSpinner />;
@@ -62,33 +36,11 @@ export default function ReceiptPage() {
           <ArrowLeft className="h-4 w-4" /> Back to POS
         </Link>
         <div className="flex gap-2">
-          {canVoid && sale.status !== 'voided' && (
-            <Button variant="danger" onClick={() => setVoidOpen(true)}>
-              <Ban className="h-4 w-4" /> Void Sale
-            </Button>
-          )}
           <Button onClick={printA5}>
             <Printer className="h-4 w-4" /> Print Invoice
           </Button>
         </div>
       </div>
-
-      <Modal open={voidOpen} onClose={() => setVoidOpen(false)} title="Void This Sale" size="sm">
-        <p className="mb-3 text-sm text-slate-600">
-          Voiding will restore the sold stock to inventory and reverse the customer's balance change. This cannot be undone.
-        </p>
-        <FormField label="Reason (optional)">
-          <Input value={voidReason} onChange={(e) => setVoidReason(e.target.value)} placeholder="e.g. Entered by mistake" />
-        </FormField>
-        <div className="mt-4 flex justify-end gap-2">
-          <Button variant="secondary" onClick={() => setVoidOpen(false)} disabled={voiding}>
-            Cancel
-          </Button>
-          <Button variant="danger" onClick={handleVoid} loading={voiding}>
-            Void Sale
-          </Button>
-        </div>
-      </Modal>
 
       <div
         id="print-area"

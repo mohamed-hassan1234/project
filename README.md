@@ -18,11 +18,14 @@ system built with React + Vite + Tailwind (frontend), Node.js + Express
 cd backend
 npm install
 cp .env.example .env    # edit MONGO_URI / JWT_SECRET if needed
-npm run seed             # creates an admin user + sample inventory
-npm run dev               # starts the API on http://localhost:5000
+npm run seed             # creates a local dev admin user + sample inventory
+npm run dev               # starts the API on http://localhost:5010
 ```
 
-Seeded login: **admin / admin123**
+Seeded login (local dev only, via `npm run seed`): **admin / admin123**
+
+For a real deployment, use `npm run seed:admin` instead (see "Production
+deployment" below) -- it never uses a hardcoded password.
 
 ### 2. Frontend
 
@@ -32,8 +35,10 @@ npm install
 npm run dev               # starts the app on http://localhost:5173
 ```
 
-The Vite dev server proxies `/api/*` to `http://localhost:5000`, so no
-frontend `.env` is required in development.
+In development the frontend talks to the API directly at the URL in
+`frontend/.env.development` (`VITE_API_URL`, defaults to
+`http://localhost:5010/api`); the Vite dev server's `/api` proxy (also
+pointed at port 5010) is kept as a fallback for tooling that relies on it.
 
 ### 3. Production build
 
@@ -42,9 +47,34 @@ cd frontend
 npm run build              # outputs static files to frontend/dist
 ```
 
-Serve `frontend/dist` behind any static host / reverse proxy, and point it
-at the backend's `/api` (set `CLIENT_ORIGIN` in the backend `.env` to your
-deployed frontend origin for CORS).
+`frontend/.env.production` sets `VITE_API_URL=https://inventory.elivateict.com/api`
+at build time -- update it if you deploy to a different domain. Serve
+`frontend/dist` as static files behind Nginx (or any reverse proxy) on the
+public domain, and proxy `/api/` on that same domain to the backend:
+
+```nginx
+location /api/ {
+    proxy_pass http://127.0.0.1:5010;
+}
+```
+
+The backend itself listens on `0.0.0.0:5010` (see `PORT` in the backend
+`.env`) and is never exposed to the public internet directly -- only via the
+reverse proxy on the same public domain. Set `CLIENT_ORIGIN` in the backend
+`.env` to a comma-separated list of the origins allowed to call the API
+(your deployed frontend origin, plus `http://localhost:5173` for local dev
+against a shared backend).
+
+### 4. Production admin account
+
+```bash
+cd backend
+# set SEED_ADMIN_USERNAME / SEED_ADMIN_NAME / SEED_ADMIN_PASSWORD in .env first
+npm run seed:admin
+```
+
+This creates exactly one admin user from environment variables (never a
+hardcoded password), and safely no-ops if that username already exists.
 
 ## Architecture notes
 

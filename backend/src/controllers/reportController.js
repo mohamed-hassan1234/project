@@ -137,7 +137,11 @@ export const profitReport = asyncHandler(async (req, res) => {
       {
         $lookup: { from: 'inventoryitems', localField: 'items.item', foreignField: '_id', as: 'itemDoc' },
       },
-      { $addFields: { category: { $ifNull: [{ $arrayElemAt: ['$itemDoc.category', 0] }, 'Uncategorized'] } } },
+      { $addFields: { categoryId: { $arrayElemAt: ['$itemDoc.category', 0] } } },
+      {
+        $lookup: { from: 'categories', localField: 'categoryId', foreignField: '_id', as: 'categoryDoc' },
+      },
+      { $addFields: { category: { $ifNull: [{ $arrayElemAt: ['$categoryDoc.name', 0] }, 'Uncategorized'] } } },
       {
         $group: {
           _id: '$category',
@@ -234,8 +238,12 @@ export const inventoryReport = asyncHandler(async (req, res) => {
     ]),
     InventoryItem.aggregate([
       {
+        $lookup: { from: 'categories', localField: 'category', foreignField: '_id', as: 'categoryDoc' },
+      },
+      { $addFields: { categoryName: { $ifNull: [{ $arrayElemAt: ['$categoryDoc.name', 0] }, 'Uncategorized'] } } },
+      {
         $group: {
-          _id: '$category',
+          _id: '$categoryName',
           costValue: { $sum: { $multiply: ['$quantity', '$costPriceCents'] } },
           sellingValue: { $sum: { $multiply: ['$quantity', '$sellingPriceCents'] } },
         },
@@ -255,11 +263,11 @@ export const inventoryReport = asyncHandler(async (req, res) => {
   const [lowStock, outOfStock, expired, nearExpiry] = await Promise.all([
     InventoryItem.find({
       $expr: { $and: [{ $gt: ['$quantity', 0] }, { $lte: ['$quantity', '$lowStockThreshold'] }] },
-    }).select('name sku quantity lowStockThreshold'),
-    InventoryItem.find({ quantity: { $lte: 0 } }).select('name sku quantity'),
-    InventoryItem.find({ expiryDate: { $ne: null, $lt: new Date() } }).select('name sku quantity expiryDate'),
+    }).select('name itemCode quantity lowStockThreshold'),
+    InventoryItem.find({ quantity: { $lte: 0 } }).select('name itemCode quantity'),
+    InventoryItem.find({ expiryDate: { $ne: null, $lt: new Date() } }).select('name itemCode quantity expiryDate'),
     InventoryItem.find({ expiryDate: { $ne: null, $gte: new Date(), $lte: cutoff } }).select(
-      'name sku quantity expiryDate'
+      'name itemCode quantity expiryDate'
     ),
   ]);
 
@@ -413,7 +421,7 @@ export const itemProfitReport = asyncHandler(async (req, res) => {
   res.json({
     success: true,
     data: {
-      item: { id: item._id, name: item.name, sku: item.sku },
+      item: { id: item._id, name: item.name, itemCode: item.itemCode },
       quantityPurchased,
       purchaseCost,
       quantitySold,

@@ -21,7 +21,8 @@ function toDTO(sale) {
     items: sale.items.map((i) => ({
       item: i.item,
       name: i.itemName,
-      sku: i.sku,
+      itemCode: i.itemCode,
+      serialNumber: i.serialNumber,
       quantity: i.quantity,
       unitPrice: fromCents(i.unitPriceCents),
       subtotal: fromCents(i.subtotalCents),
@@ -96,7 +97,8 @@ export const createSale = asyncHandler(async (req, res) => {
       saleItems.push({
         item: item._id,
         itemName: item.name,
-        sku: item.sku,
+        itemCode: item.itemCode,
+        serialNumber: item.serialNumber,
         quantity: qty,
         unitPriceCents,
         costPriceCents: weightedUnitCostCents,

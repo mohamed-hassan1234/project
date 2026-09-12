@@ -14,13 +14,30 @@ import reportRoutes from './routes/reports.js';
 import dashboardRoutes from './routes/dashboard.js';
 
 import { notFoundHandler, errorHandler } from './middleware/errorHandler.js';
+import { ApiError } from './utils/ApiError.js';
 
 const app = express();
 
+// CLIENT_ORIGIN is a comma-separated allowlist (deployed frontend origin(s)
+// plus, for local development, the Vite dev server origin). Requests with no
+// Origin header (server-to-server calls, curl, health checks) are allowed
+// through since there is no browser same-origin policy to enforce for them.
+const allowedOrigins = (process.env.CLIENT_ORIGIN || 'http://localhost:5173')
+  .split(',')
+  .map((o) => o.trim())
+  .filter(Boolean);
+
 app.use(
   cors({
-    origin: process.env.CLIENT_ORIGIN || 'http://localhost:5173',
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+      return callback(new ApiError(403, 'Not allowed by CORS'));
+    },
     credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
   })
 );
 app.use(express.json({ limit: '2mb' }));
@@ -28,7 +45,9 @@ if (process.env.NODE_ENV !== 'test') {
   app.use(morgan('dev'));
 }
 
-app.get('/api/health', (req, res) => res.json({ success: true, status: 'ok', time: new Date().toISOString() }));
+app.get('/api/health', (req, res) =>
+  res.json({ success: true, service: 'inventory-api', status: 'ok', time: new Date().toISOString() })
+);
 
 app.use('/api/auth', authRoutes);
 app.use('/api/inventory', inventoryRoutes);

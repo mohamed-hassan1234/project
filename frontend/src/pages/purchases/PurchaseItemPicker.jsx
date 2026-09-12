@@ -13,7 +13,7 @@ export default function PurchaseItemPicker({ onAdd }) {
   const [results, setResults] = useState([]);
   const [showDropdown, setShowDropdown] = useState(false);
   const [showCreateForm, setShowCreateForm] = useState(false);
-  const [newItem, setNewItem] = useState({ name: '', category: 'Uncategorized', unit: 'pcs' });
+  const [newItem, setNewItem] = useState({ name: '', unit: 'pcs' });
   const [creating, setCreating] = useState(false);
   const boxRef = useRef(null);
 
@@ -69,7 +69,7 @@ export default function PurchaseItemPicker({ onAdd }) {
         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
         <Input
           className="pl-9"
-          placeholder="Search inventory by name or SKU..."
+          placeholder="Search inventory by name, Item ID or serial number..."
           value={query}
           onChange={(e) => {
             setQuery(e.target.value);
@@ -92,7 +92,7 @@ export default function PurchaseItemPicker({ onAdd }) {
                     <div>
                       <p className="text-sm font-medium text-slate-800">{p.name}</p>
                       <p className="text-xs text-slate-400">
-                        {p.sku || 'No SKU'} · current stock: {p.quantity}
+                        {p.itemCode} · current stock: {p.quantity}
                       </p>
                     </div>
                   </button>
@@ -104,7 +104,7 @@ export default function PurchaseItemPicker({ onAdd }) {
           )}
           <button
             onClick={() => {
-              setNewItem({ name: query, category: 'Uncategorized', unit: 'pcs' });
+              setNewItem({ name: query, unit: 'pcs' });
               setShowCreateForm(true);
               setShowDropdown(false);
             }}
@@ -120,10 +120,8 @@ export default function PurchaseItemPicker({ onAdd }) {
           <p className="mb-3 text-sm font-semibold text-slate-800">Create New Inventory Item</p>
           <form onSubmit={handleCreate} className="space-y-3">
             <Input autoFocus placeholder="Item name" value={newItem.name} onChange={(e) => setNewItem((f) => ({ ...f, name: e.target.value }))} />
-            <div className="grid grid-cols-2 gap-2">
-              <Input placeholder="Category" value={newItem.category} onChange={(e) => setNewItem((f) => ({ ...f, category: e.target.value }))} />
-              <Input placeholder="Unit (pcs, kg...)" value={newItem.unit} onChange={(e) => setNewItem((f) => ({ ...f, unit: e.target.value }))} />
-            </div>
+            <Input placeholder="Unit (pcs, kg...)" value={newItem.unit} onChange={(e) => setNewItem((f) => ({ ...f, unit: e.target.value }))} />
+            <p className="text-xs text-slate-400">Category can be set later from the Inventory page. New item will be Uncategorized for now.</p>
             <div className="flex justify-end gap-2">
               <Button type="button" variant="secondary" size="sm" onClick={() => setShowCreateForm(false)}>
                 Cancel

@@ -18,7 +18,9 @@ const saleItemSchema = new mongoose.Schema(
   {
     item: { type: mongoose.Schema.Types.ObjectId, ref: 'InventoryItem', required: true },
     itemName: { type: String, required: true },
-    sku: { type: String, default: '' },
+    itemCode: { type: String, default: '' },
+    serialNumber: { type: String, default: '' },
+    sku: { type: String, default: '' }, // legacy, kept for historical records
     quantity: { type: Number, required: true, min: 1 },
     unitPriceCents: { type: Number, required: true, min: 0 }, // selling price at time of sale
     costPriceCents: { type: Number, required: true, min: 0 }, // weighted-avg FIFO cost at time of sale (historical)

@@ -176,12 +176,12 @@ export default function InventoryPage() {
       <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-6">
         <div className="relative lg:col-span-2">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-          <Input className="pl-9" placeholder="Search by name, SKU or barcode..." value={search} onChange={(e) => setSearch(e.target.value)} />
+          <Input className="pl-9" placeholder="Search by item, serial number, or item ID..." value={search} onChange={(e) => setSearch(e.target.value)} />
         </div>
         <Select value={category} onChange={(e) => setCategory(e.target.value)}>
           <option value="">All Categories</option>
           {categories.map((c) => (
-            <option key={c.id} value={c.name}>
+            <option key={c.id} value={c.id}>
               {c.name}
             </option>
           ))}
@@ -217,12 +217,13 @@ export default function InventoryPage() {
       <Table>
         <THead>
           <tr>
-            <Th>Item</Th>
+            <Th>Item ID</Th>
+            <Th>Item Name</Th>
+            <Th>Serial Number</Th>
             <Th>Category</Th>
             <Th>Supplier</Th>
             <Th>Quantity</Th>
             <Th>Cost / Sell</Th>
-            <Th>Stock Value</Th>
             <Th>Status</Th>
             <Th>Expiry</Th>
             <Th>Created</Th>
@@ -231,32 +232,32 @@ export default function InventoryPage() {
         </THead>
         <TBody>
           {loading ? (
-            <TableLoading colSpan={10} />
+            <TableLoading colSpan={11} />
           ) : items.length === 0 ? (
-            <TableEmpty colSpan={10} message="No inventory items found. Try adjusting your filters or add a new item." />
+            <TableEmpty colSpan={11} message="No inventory items found. Try adjusting your filters or add a new item." />
           ) : (
             items.map((item) => {
               const stock = stockStatusBadge(item.stockStatus);
               const expiry = expiryStatusBadge(item.expiryStatus);
               return (
                 <tr key={item.id} className="hover:bg-slate-50">
+                  <Td className="whitespace-nowrap font-mono text-xs text-slate-500">{item.itemCode}</Td>
                   <Td>
                     <button onClick={() => setDetailsItem(item)} className="text-left font-medium text-slate-900 hover:text-indigo-600">
                       {item.name}
                     </button>
-                    <p className="text-xs text-slate-400">{item.sku || 'No SKU'}</p>
                   </Td>
-                  <Td>{item.category}</Td>
+                  <Td className="whitespace-nowrap text-xs text-slate-500">{item.serialNumber || '—'}</Td>
+                  <Td>{item.category?.name || 'Uncategorized'}</Td>
                   <Td>{item.supplier?.name || '—'}</Td>
-                  <Td>
+                  <Td className="tabular-nums">
                     {item.quantity} {item.unit}
                   </Td>
-                  <Td>
+                  <Td className="tabular-nums">
                     <span className="text-slate-500">{formatCurrency(item.costPrice)}</span>
                     {' / '}
                     <span className="font-medium">{formatCurrency(item.sellingPrice)}</span>
                   </Td>
-                  <Td>{formatCurrency(item.quantity * item.costPrice)}</Td>
                   <Td>
                     <Badge color={stock.color}>{stock.label}</Badge>
                   </Td>

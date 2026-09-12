@@ -1,5 +1,9 @@
 @import "tailwindcss";
 
+@theme {
+  --font-sans: 'Roboto', ui-sans-serif, system-ui, sans-serif;
+}
+
 :root {
   color-scheme: light;
 }
@@ -10,10 +14,22 @@ html, body, #root {
 
 body {
   @apply bg-slate-50 text-slate-900 antialiased;
+  font-family: 'Roboto', ui-sans-serif, system-ui, sans-serif;
 }
 
 * {
   box-sizing: border-box;
+}
+
+/* Plain manual-entry numeric inputs (Seller/POS quantity, etc.) -- no
+   increment/decrement stepper control of any kind. */
+.no-spinner::-webkit-outer-spin-button,
+.no-spinner::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.no-spinner {
+  -moz-appearance: textfield;
 }
 
 ::-webkit-scrollbar {

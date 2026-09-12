@@ -7,6 +7,8 @@ import AppLayout from './layouts/AppLayout.jsx';
 import Login from './pages/Login.jsx';
 import Dashboard from './pages/Dashboard.jsx';
 import InventoryPage from './pages/inventory/InventoryPage.jsx';
+import InventoryPrintPage from './pages/inventory/InventoryPrintPage.jsx';
+import CategoriesPage from './pages/categories/CategoriesPage.jsx';
 import POSPage from './pages/pos/POSPage.jsx';
 import PurchasesPage from './pages/purchases/PurchasesPage.jsx';
 import CustomersPage from './pages/customers/CustomersPage.jsx';
@@ -35,6 +37,8 @@ export default function App() {
             >
               <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/inventory" element={<InventoryPage />} />
+              <Route path="/inventory/:id/print" element={<InventoryPrintPage />} />
+              <Route path="/categories" element={<CategoriesPage />} />
               <Route path="/pos" element={<POSPage />} />
               <Route path="/purchases" element={<PurchasesPage />} />
               <Route path="/customers" element={<CustomersPage />} />

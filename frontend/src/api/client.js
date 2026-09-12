@@ -1,7 +1,11 @@
 import axios from 'axios';
 
+// VITE_API_URL is baked in at build time (see .env.development / .env.production).
+// Falling back to the local backend keeps `vite`/`vite preview` usable even
+// without an env file present.
 const client = axios.create({
-  baseURL: '/api',
+  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:5010/api',
+  withCredentials: true,
   headers: { 'Content-Type': 'application/json' },
 });
 

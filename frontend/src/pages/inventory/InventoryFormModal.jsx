@@ -1,21 +1,19 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import Modal from '../../components/ui/Modal.jsx';
 import Button from '../../components/ui/Button.jsx';
-import { FormField, Input, Select, Textarea } from '../../components/ui/Field.jsx';
+import { FormField, Input, Select } from '../../components/ui/Field.jsx';
 import client from '../../api/client.js';
 import { useToast } from '../../context/ToastContext.jsx';
 
 const emptyForm = {
   name: '',
-  sku: '',
-  barcode: '',
+  serialNumber: '',
   category: '',
-  description: '',
   quantity: '0',
   unit: 'pcs',
   costPrice: '',
   sellingPrice: '',
-  lowStockThreshold: '5',
   expiryDate: '',
   supplier: '',
 };
@@ -38,15 +36,12 @@ export default function InventoryFormModal({ open, onClose, item, onSaved }) {
     if (item) {
       setForm({
         name: item.name || '',
-        sku: item.sku || '',
-        barcode: item.barcode || '',
-        category: item.category || '',
-        description: item.description || '',
+        serialNumber: item.serialNumber || '',
+        category: item.category?.id || '',
         quantity: String(item.quantity ?? 0),
         unit: item.unit || 'pcs',
         costPrice: String(item.costPrice ?? ''),
         sellingPrice: String(item.sellingPrice ?? ''),
-        lowStockThreshold: String(item.lowStockThreshold ?? 5),
         expiryDate: item.expiryDate ? item.expiryDate.slice(0, 10) : '',
         supplier: item.supplier?._id || item.supplier || '',
       });
@@ -64,7 +59,6 @@ export default function InventoryFormModal({ open, onClose, item, onSaved }) {
     if (form.costPrice === '' || Number(form.costPrice) < 0) e.costPrice = 'Enter a valid cost price.';
     if (form.sellingPrice === '' || Number(form.sellingPrice) < 0) e.sellingPrice = 'Enter a valid selling price.';
     if (Number(form.quantity) < 0) e.quantity = 'Quantity cannot be negative.';
-    if (Number(form.lowStockThreshold) < 0) e.lowStockThreshold = 'Cannot be negative.';
     setErrors(e);
     return Object.keys(e).length === 0;
   };
@@ -76,12 +70,13 @@ export default function InventoryFormModal({ open, onClose, item, onSaved }) {
     try {
       const payload = {
         ...form,
+        serialNumber: form.serialNumber.trim(),
         quantity: Number(form.quantity),
         costPrice: Number(form.costPrice),
         sellingPrice: Number(form.sellingPrice),
-        lowStockThreshold: Number(form.lowStockThreshold),
         expiryDate: form.expiryDate || null,
         supplier: form.supplier || null,
+        category: form.category || null,
       };
       if (item) {
         await client.put(`/inventory/${item.id}`, payload);
@@ -105,27 +100,35 @@ export default function InventoryFormModal({ open, onClose, item, onSaved }) {
         <section>
           <h4 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">Basic Information</h4>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            {item && (
+              <FormField label="Item ID">
+                <Input value={item.itemCode || ''} disabled className="bg-slate-50 font-mono text-slate-500" />
+              </FormField>
+            )}
             <FormField label="Item Name" required error={errors.name}>
               <Input value={form.name} onChange={set('name')} placeholder="e.g. Rice (5kg bag)" />
             </FormField>
+            <FormField label="Serial Number">
+              <Input value={form.serialNumber} onChange={set('serialNumber')} placeholder="e.g. SN-100245" />
+            </FormField>
             <FormField label="Category">
-              <Input list="category-options" value={form.category} onChange={set('category')} placeholder="e.g. Groceries" />
-              <datalist id="category-options">
-                {categories.map((c) => (
-                  <option key={c.id} value={c.name} />
-                ))}
-              </datalist>
-            </FormField>
-            <FormField label="SKU / Item Code">
-              <Input value={form.sku} onChange={set('sku')} placeholder="e.g. RICE-5KG" />
-            </FormField>
-            <FormField label="Barcode">
-              <Input value={form.barcode} onChange={set('barcode')} placeholder="Optional" />
-            </FormField>
-          </div>
-          <div className="mt-4">
-            <FormField label="Description">
-              <Textarea rows={2} value={form.description} onChange={set('description')} placeholder="Optional notes about this item" />
+              {categories.length === 0 ? (
+                <div className="rounded-lg border border-dashed border-slate-300 px-3 py-2 text-sm text-slate-500">
+                  No categories yet.{' '}
+                  <Link to="/categories" className="font-medium text-indigo-600 hover:underline" onClick={onClose}>
+                    Create one
+                  </Link>
+                </div>
+              ) : (
+                <Select value={form.category} onChange={set('category')}>
+                  <option value="">Uncategorized</option>
+                  {categories.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </Select>
+              )}
             </FormField>
           </div>
         </section>
@@ -144,15 +147,12 @@ export default function InventoryFormModal({ open, onClose, item, onSaved }) {
 
         <section>
           <h4 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">Stock Information</h4>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <FormField label="Quantity" error={errors.quantity}>
               <Input type="number" min="0" value={form.quantity} onChange={set('quantity')} />
             </FormField>
             <FormField label="Unit">
               <Input value={form.unit} onChange={set('unit')} placeholder="pcs, kg, bag..." />
-            </FormField>
-            <FormField label="Low Stock Threshold" error={errors.lowStockThreshold}>
-              <Input type="number" min="0" value={form.lowStockThreshold} onChange={set('lowStockThreshold')} />
             </FormField>
           </div>
         </section>
