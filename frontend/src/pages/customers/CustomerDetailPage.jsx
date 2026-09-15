@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Printer, Wallet, Receipt, History } from 'lucide-react';
+import { ArrowLeft, Wallet, Receipt, History, FileText } from 'lucide-react';
 import client from '../../api/client.js';
 import { useToast } from '../../context/ToastContext.jsx';
 import { formatCurrency, formatDate, formatDateTime } from '../../utils/format.js';
@@ -57,9 +57,11 @@ export default function CustomerDetailPage() {
           <ArrowLeft className="h-4 w-4" /> Back to Customers
         </Link>
         <div className="flex gap-2">
-          <Button variant="secondary" onClick={() => window.print()}>
-            <Printer className="h-4 w-4" /> Print Report
-          </Button>
+          <Link to={`/customers/${id}/statement`}>
+            <Button variant="secondary">
+              <FileText className="h-4 w-4" /> Print Complete Customer Statement
+            </Button>
+          </Link>
           <Button onClick={() => setPayOpen(true)} disabled={customer.balance <= 0}>
             <Wallet className="h-4 w-4" /> Pay Debt
           </Button>
@@ -142,7 +144,8 @@ export default function CustomerDetailPage() {
                     <div className="flex items-center gap-2">
                       <Receipt className="h-4 w-4 text-slate-400" />
                       <span className="font-semibold text-slate-800">{s.receiptNumber}</span>
-                      {s.status === 'voided' && <Badge color="red">Voided</Badge>}
+                      {s.status === 'CANCELLED' && <Badge color="red">Cancelled</Badge>}
+                      {s.status === 'DRAFT' && <Badge color="amber">Pending</Badge>}
                     </div>
                     <div className="flex items-center gap-3">
                       <span className="text-xs text-slate-400">{formatDateTime(s.createdAt)}</span>

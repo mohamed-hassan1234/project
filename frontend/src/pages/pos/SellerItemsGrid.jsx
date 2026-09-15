@@ -34,7 +34,7 @@ function ItemSearchCell({ onSelect, placeholder, inputRef }) {
   }, []);
 
   const choose = (item) => {
-    if (!item || item.quantity <= 0) return;
+    if (!item || item.availableQuantity <= 0) return;
     onSelect(item);
     setQuery('');
     setResults([]);
@@ -91,7 +91,7 @@ function ItemSearchCell({ onSelect, placeholder, inputRef }) {
                       e.preventDefault();
                       choose(r);
                     }}
-                    disabled={r.quantity <= 0}
+                    disabled={r.availableQuantity <= 0}
                     className={`flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-xs disabled:cursor-not-allowed disabled:opacity-40 ${
                       i === highlighted ? 'bg-indigo-50' : 'hover:bg-slate-50'
                     }`}
@@ -101,7 +101,7 @@ function ItemSearchCell({ onSelect, placeholder, inputRef }) {
                       <p className="truncate text-slate-400">
                         {r.itemCode}
                         {r.serialNumber ? ` · SN: ${r.serialNumber}` : ''} ·{' '}
-                        {r.quantity <= 0 ? 'Out of stock' : `${r.quantity} ${r.unit} avail.`}
+                        {r.availableQuantity <= 0 ? 'Out of stock/reserved' : `${r.availableQuantity} ${r.unit} avail.`}
                       </p>
                     </div>
                     <span className="shrink-0 font-semibold tabular-nums text-slate-700">{formatCurrency(r.sellingPrice)}</span>

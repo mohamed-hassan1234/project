@@ -1,3 +1,4 @@
+import BatchHistory from '../../components/BatchHistory.jsx';
 import { useCallback, useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { Printer, ArrowLeft } from 'lucide-react';
@@ -27,9 +28,9 @@ export default function InventoryPrintPage() {
   if (!item) return <PageSpinner />;
 
   const history = item.purchaseHistory || [];
-  const hasLongHistory = history.length > 6;
+  const hasLongHistory = true;
   const pageSize = hasLongHistory ? 'A4' : 'A5';
-  const totalCostValue = item.quantity * item.costPrice;
+  const totalCostValue = (item.batches || []).reduce((sum, b) => sum + b.remainingQuantity * b.unitCostCents / 100, 0);
 
   return (
     <div>
@@ -120,6 +121,7 @@ export default function InventoryPrintPage() {
           </tbody>
         </table>
 
+        <BatchHistory item={item} />
         {history.length > 0 && (
           <>
             <div className="my-3 border-t border-dashed border-slate-300" />

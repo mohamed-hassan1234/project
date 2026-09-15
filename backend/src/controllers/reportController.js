@@ -8,12 +8,13 @@ import { resolveDateRange } from '../utils/dateRange.js';
 
 const NEAR_EXPIRY_DAYS = 30;
 
-// GET /api/reports/sales
+// GET /api/reports/sales -- CONFIRMED invoices only (Draft/Cancelled never
+// count toward finalized revenue/profit/reporting).
 export const salesReport = asyncHandler(async (req, res) => {
   const { start, end } = resolveDateRange(req.query);
-  const match = { status: 'completed', createdAt: { $gte: start, $lte: end } };
+  const match = { status: 'CONFIRMED', createdAt: { $gte: start, $lte: end } };
 
-  const [[agg], byDay, topByQty, topByRevenue, cashVsCredit, receivablesAgg] = await Promise.all([
+  const [[agg], byDay, topByQty, topByRevenue, cashVsCredit, receivablesAgg, byAccount] = await Promise.all([
     Sale.aggregate([
       { $match: match },
       {
@@ -58,8 +59,14 @@ export const salesReport = asyncHandler(async (req, res) => {
     ]),
     // Outstanding receivables is a current balance-sheet figure, not scoped to the date range.
     Sale.aggregate([
-      { $match: { status: 'completed', outstandingCents: { $gt: 0 } } },
+      { $match: { status: 'CONFIRMED', outstandingCents: { $gt: 0 } } },
       { $group: { _id: null, total: { $sum: '$outstandingCents' } } },
+    ]),
+    Sale.aggregate([
+      { $match: { ...match, paymentAccount: { $ne: null }, paidAmountCents: { $gt: 0 } } },
+      { $lookup: { from: 'accounts', localField: 'paymentAccount', foreignField: '_id', as: 'acc' } },
+      { $group: { _id: { $ifNull: [{ $arrayElemAt: ['$acc.name', 0] }, 'Unknown'] }, amount: { $sum: '$paidAmountCents' } } },
+      { $sort: { amount: -1 } },
     ]),
   ]);
 
@@ -84,6 +91,7 @@ export const salesReport = asyncHandler(async (req, res) => {
         cash: fromCents(cashVsCredit[0]?.cash || 0),
         credit: fromCents(cashVsCredit[0]?.credit || 0),
       },
+      paymentByAccount: byAccount.map((a) => ({ account: a._id, amount: fromCents(a.amount) })),
     },
   });
 });
@@ -91,7 +99,7 @@ export const salesReport = asyncHandler(async (req, res) => {
 // GET /api/reports/profit
 export const profitReport = asyncHandler(async (req, res) => {
   const { start, end } = resolveDateRange(req.query);
-  const match = { status: 'completed', createdAt: { $gte: start, $lte: end } };
+  const match = { status: 'CONFIRMED', createdAt: { $gte: start, $lte: end } };
 
   const [[agg], byDay, byItem, byCategory] = await Promise.all([
     Sale.aggregate([
@@ -125,7 +133,7 @@ export const profitReport = asyncHandler(async (req, res) => {
         $group: {
           _id: { itemId: '$items.item', itemName: '$items.itemName' },
           revenue: { $sum: '$items.subtotalCents' },
-          cost: { $sum: { $multiply: ['$items.quantity', '$items.costPriceCents'] } },
+          cost: { $sum: { $cond: [{ $gt: [{ $size: { $ifNull: ['$items.lotConsumption', []] } }, 0] }, { $sum: { $map: { input: '$items.lotConsumption', as: 'allocation', in: { $multiply: ['$$allocation.quantity', '$$allocation.unitCostCents'] } } } }, { $multiply: ['$items.quantity', '$items.costPriceCents'] }] } },
         },
       },
       { $addFields: { profit: { $subtract: ['$revenue', '$cost'] } } },
@@ -146,7 +154,7 @@ export const profitReport = asyncHandler(async (req, res) => {
         $group: {
           _id: '$category',
           revenue: { $sum: '$items.subtotalCents' },
-          cost: { $sum: { $multiply: ['$items.quantity', '$items.costPriceCents'] } },
+          cost: { $sum: { $cond: [{ $gt: [{ $size: { $ifNull: ['$items.lotConsumption', []] } }, 0] }, { $sum: { $map: { input: '$items.lotConsumption', as: 'allocation', in: { $multiply: ['$$allocation.quantity', '$$allocation.unitCostCents'] } } } }, { $multiply: ['$items.quantity', '$items.costPriceCents'] }] } },
         },
       },
       { $addFields: { profit: { $subtract: ['$revenue', '$cost'] } } },
@@ -195,7 +203,7 @@ export const profitByItemDrilldown = asyncHandler(async (req, res) => {
   const itemId = req.params.itemId;
 
   const sales = await Sale.find({
-    status: 'completed',
+    status: 'CONFIRMED',
     createdAt: { $gte: start, $lte: end },
     'items.item': itemId,
   })
@@ -213,8 +221,8 @@ export const profitByItemDrilldown = asyncHandler(async (req, res) => {
         createdAt: sale.createdAt,
         quantity: line.quantity,
         revenue: fromCents(line.subtotalCents),
-        cost: fromCents(line.quantity * line.costPriceCents),
-        profit: fromCents(line.subtotalCents - line.quantity * line.costPriceCents),
+        cost: fromCents((line.lotConsumption?.length ? line.lotConsumption.reduce((sum, a) => sum + a.quantity * a.unitCostCents, 0) : line.quantity * line.costPriceCents)),
+        profit: fromCents(line.subtotalCents - (line.lotConsumption?.length ? line.lotConsumption.reduce((sum, a) => sum + a.quantity * a.unitCostCents, 0) : line.quantity * line.costPriceCents)),
       });
     }
   }
@@ -396,7 +404,7 @@ export const itemProfitReport = asyncHandler(async (req, res) => {
   ]);
 
   const [saleAgg] = await Sale.aggregate([
-    { $match: { status: 'completed' } },
+    { $match: { status: 'CONFIRMED' } },
     { $unwind: '$items' },
     { $match: { 'items.item': item._id } },
     {
@@ -404,7 +412,7 @@ export const itemProfitReport = asyncHandler(async (req, res) => {
         _id: null,
         quantitySold: { $sum: '$items.quantity' },
         revenue: { $sum: '$items.subtotalCents' },
-        costOfGoodsSold: { $sum: { $multiply: ['$items.quantity', '$items.costPriceCents'] } },
+        costOfGoodsSold: { $sum: { $cond: [{ $gt: [{ $size: { $ifNull: ['$items.lotConsumption', []] } }, 0] }, { $sum: { $map: { input: '$items.lotConsumption', as: 'allocation', in: { $multiply: ['$$allocation.quantity', '$$allocation.unitCostCents'] } } } }, { $multiply: ['$items.quantity', '$items.costPriceCents'] }] } },
       },
     },
   ]);

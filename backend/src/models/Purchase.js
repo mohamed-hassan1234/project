@@ -13,13 +13,16 @@ const purchaseItemSchema = new mongoose.Schema(
 
 const purchaseSchema = new mongoose.Schema(
   {
-    purchaseNumber: { type: String, required: true, unique: true },
+    purchaseNumber: { type: String, required: true, unique: true }, // our own internal serial, e.g. PINV-2026-000001
+    supplierInvoiceNumber: { type: String, trim: true, default: '' }, // the supplier's own invoice/serial number
     supplier: { type: mongoose.Schema.Types.ObjectId, ref: 'Supplier', required: true },
     supplierName: { type: String, required: true },
-    items: { type: [purchaseItemSchema], required: true, validate: (v) => v.length > 0 },
+    items: { type: [purchaseItemSchema], default: [] },
     totalCostCents: { type: Number, required: true, default: 0 },
     paidAmountCents: { type: Number, required: true, default: 0 },
     balanceCents: { type: Number, required: true, default: 0 }, // owed to supplier
+    paymentAccount: { type: mongoose.Schema.Types.ObjectId, ref: 'Account', default: null },
+    accountTransaction: { type: mongoose.Schema.Types.ObjectId, ref: 'AccountTransaction', default: null },
     purchaseDate: { type: Date, default: Date.now },
     notes: { type: String, default: '' },
     status: { type: String, enum: ['completed', 'voided'], default: 'completed' },

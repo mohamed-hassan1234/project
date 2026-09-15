@@ -147,7 +147,7 @@ function SalesReport({ data, rangeParams }) {
   useEffect(() => {
     setSales(null);
     client
-      .get('/sales', { params: { ...rangeParams, status: 'completed', limit: 300 } })
+      .get('/sales', { params: { ...rangeParams, status: 'CONFIRMED', limit: 300 } })
       .then((res) => setSales(res.data.data))
       .catch((err) => toast.error(err.friendlyMessage || 'Failed to load sales.'));
   }, [rangeParams.range, rangeParams.from, rangeParams.to]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -221,6 +221,30 @@ function SalesReport({ data, rangeParams }) {
                   <Cell fill="#f59e0b" />
                 </Pie>
                 <Tooltip formatter={(v) => formatCurrency(v)} />
+              </PieChart>
+            </ResponsiveContainer>
+          )}
+        </ReportSection>
+
+        <ReportSection title="Revenue by Payment Account">
+          {!data.paymentByAccount || data.paymentByAccount.length === 0 ? (
+            <EmptyReportState message="No account payments found for this date range." />
+          ) : (
+            <ResponsiveContainer width="100%" height={220}>
+              <PieChart>
+                <Pie
+                  data={data.paymentByAccount}
+                  dataKey="amount"
+                  nameKey="account"
+                  outerRadius={80}
+                  label={(e) => `${e.account}: ${formatCurrency(e.amount)}`}
+                >
+                  {data.paymentByAccount.map((entry, i) => (
+                    <Cell key={entry.account} fill={['#4f46e5', '#0ea5e9', '#10b981', '#f59e0b', '#f43f5e', '#a855f7'][i % 6]} />
+                  ))}
+                </Pie>
+                <Tooltip formatter={(v) => formatCurrency(v)} />
+                <Legend />
               </PieChart>
             </ResponsiveContainer>
           )}

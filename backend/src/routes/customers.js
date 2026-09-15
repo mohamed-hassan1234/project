@@ -10,6 +10,7 @@ import {
   getCustomerHistory,
   getCustomerDebt,
   payCustomerDebt,
+  getCustomerStatement,
 } from '../controllers/customerController.js';
 
 const router = Router();
@@ -22,6 +23,7 @@ router.get('/:id', getCustomer);
 router.put('/:id', updateCustomer);
 router.delete('/:id', deleteCustomer);
 router.get('/:id/history', getCustomerHistory);
+router.get('/:id/statement', getCustomerStatement);
 router.get('/:id/debt', getCustomerDebt);
 router.post('/:id/payments', payCustomerDebt);
 

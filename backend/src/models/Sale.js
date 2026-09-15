@@ -2,9 +2,12 @@ import mongoose from 'mongoose';
 
 // Which lots (and therefore which purchases/suppliers) a sold quantity was
 // drawn from, in FIFO order. Lets supplier/item profitability reports trace
-// realized revenue and COGS back to the exact purchase batch.
+// realized revenue and COGS back to the exact purchase batch. Populated only
+// at CONFIRM time (Close Day) -- a DRAFT sale has reserved stock but has not
+// consumed any lot yet.
 const lotConsumptionSchema = new mongoose.Schema(
   {
+    stockSerial: { type: String, default: '' },
     lot: { type: mongoose.Schema.Types.ObjectId, ref: 'InventoryLot', required: true },
     supplier: { type: mongoose.Schema.Types.ObjectId, ref: 'Supplier', default: null },
     purchase: { type: mongoose.Schema.Types.ObjectId, ref: 'Purchase', default: null },
@@ -23,8 +26,11 @@ const saleItemSchema = new mongoose.Schema(
     sku: { type: String, default: '' }, // legacy, kept for historical records
     quantity: { type: Number, required: true, min: 1 },
     unitPriceCents: { type: Number, required: true, min: 0 }, // selling price at time of sale
-    costPriceCents: { type: Number, required: true, min: 0 }, // weighted-avg FIFO cost at time of sale (historical)
+    // Estimated at Draft creation time (item's current cost price); replaced
+    // with the real FIFO-weighted cost the moment the sale is CONFIRMED.
+    costPriceCents: { type: Number, required: true, min: 0 },
     subtotalCents: { type: Number, required: true, min: 0 },
+    batchReservations: { type: [lotConsumptionSchema], default: [] },
     lotConsumption: { type: [lotConsumptionSchema], default: [] },
   },
   { _id: false }
@@ -40,14 +46,20 @@ const saleSchema = new mongoose.Schema(
     discountCents: { type: Number, required: true, default: 0 },
     totalCents: { type: Number, required: true, default: 0 },
     paidAmountCents: { type: Number, required: true, default: 0 }, // paid at the moment of sale
+    paymentAccount: { type: mongoose.Schema.Types.ObjectId, ref: 'Account', default: null },
+    accountTransaction: { type: mongoose.Schema.Types.ObjectId, ref: 'AccountTransaction', default: null },
     balanceAddedCents: { type: Number, required: true, default: 0 }, // credit created by this sale (totalCents - paidAmountCents)
     outstandingCents: { type: Number, required: true, default: 0 }, // remaining unpaid on THIS invoice (decreases as debt payments are allocated to it)
     costOfGoodsCents: { type: Number, required: true, default: 0 },
     profitCents: { type: Number, required: true, default: 0 },
-    previousBalanceCents: { type: Number, required: true, default: 0 }, // customer's outstanding debt immediately before this sale
-    status: { type: String, enum: ['completed', 'voided'], default: 'completed' },
-    voidedAt: { type: Date, default: null },
-    voidedReason: { type: String, default: '' },
+    previousBalanceCents: { type: Number, required: true, default: 0 }, // customer's outstanding debt immediately before this sale (estimated at draft time, finalized at confirm)
+    // DRAFT: created today, editable, reserves stock, excluded from finalized reports.
+    // CONFIRMED: permanent -- created by Close Day. Deducts stock, posts revenue/COGS/profit/debt/account.
+    // CANCELLED: released reservation, excluded from reports, history preserved.
+    status: { type: String, enum: ['DRAFT', 'CONFIRMED', 'CANCELLED'], default: 'DRAFT' },
+    confirmedAt: { type: Date, default: null },
+    cancelledAt: { type: Date, default: null },
+    cancelledReason: { type: String, default: '' },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   },
   { timestamps: true }
@@ -55,7 +67,8 @@ const saleSchema = new mongoose.Schema(
 
 saleSchema.index({ customer: 1, createdAt: -1 });
 saleSchema.index({ createdAt: -1 });
-saleSchema.index({ receiptNumber: 1 });
+
 saleSchema.index({ customer: 1, outstandingCents: 1 });
+saleSchema.index({ status: 1, createdAt: -1 });
 
 export default mongoose.model('Sale', saleSchema);

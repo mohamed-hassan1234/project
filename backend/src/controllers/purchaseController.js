@@ -2,6 +2,7 @@ import Purchase from '../models/Purchase.js';
 import Supplier from '../models/Supplier.js';
 import InventoryItem from '../models/InventoryItem.js';
 import InventoryLot from '../models/InventoryLot.js';
+import Account from '../models/Account.js';
 import { nextSequence } from '../models/Counter.js';
 import { ApiError } from '../utils/ApiError.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
@@ -9,12 +10,13 @@ import { toCents, fromCents } from '../utils/money.js';
 import { runInTransaction } from '../utils/transaction.js';
 import { resolveDateRange } from '../utils/dateRange.js';
 import { logAudit } from '../services/auditService.js';
-import { createLotForPurchase } from '../services/lotService.js';
+import { postImmediateTransaction } from '../services/accountService.js';
 
 function toDTO(p) {
   return {
     id: p._id,
     purchaseNumber: p.purchaseNumber,
+    supplierInvoiceNumber: p.supplierInvoiceNumber,
     supplier: p.supplier,
     supplierName: p.supplierName,
     items: p.items.map((i) => ({
@@ -27,6 +29,8 @@ function toDTO(p) {
     totalCost: fromCents(p.totalCostCents),
     paidAmount: fromCents(p.paidAmountCents),
     balance: fromCents(p.balanceCents),
+    paymentAccount: p.paymentAccount?._id || p.paymentAccount,
+    paymentAccountName: p.paymentAccount?.name || '',
     purchaseDate: p.purchaseDate,
     notes: p.notes,
     status: p.status,
@@ -40,63 +44,37 @@ async function generatePurchaseNumber(session) {
   return `PUR-${year}-${String(seq).padStart(6, '0')}`;
 }
 
-// POST /api/purchases
+// POST /api/purchases -- purchase invoices are recorded and paid immediately
+// (there is no Draft state for purchases). The payment account is required
+// whenever anything is being paid now, and its balance is checked BEFORE any
+// stock/account mutation happens -- an insufficient account never partially
+// applies and never silently pulls the shortfall from another account.
 export const createPurchase = asyncHandler(async (req, res) => {
-  const { supplierId, items, paidAmount = 0, purchaseDate, notes = '' } = req.body;
-
+  const { supplierId, supplierInvoiceNumber = '', amount, purchaseAccountId } = req.body;
+  if (typeof supplierInvoiceNumber !== 'string') throw new ApiError(400, 'Supplier invoice number must be text.');
   if (!supplierId) throw new ApiError(400, 'Please select or create a supplier.');
-  if (!Array.isArray(items) || items.length === 0) {
-    throw new ApiError(400, 'Add at least one item to the purchase.');
-  }
-  for (const line of items) {
-    if (!line.itemId) throw new ApiError(400, 'Each purchase line must reference a product.');
-    if (!Number.isFinite(Number(line.quantity)) || Number(line.quantity) <= 0) {
-      throw new ApiError(400, 'Quantity must be greater than zero for every item.');
-    }
-    if (!Number.isFinite(Number(line.unitCost)) || Number(line.unitCost) < 0) {
-      throw new ApiError(400, 'Unit cost must be a valid non-negative number.');
-    }
-  }
-
+  if (!Number.isFinite(Number(amount)) || toCents(amount) <= 0) throw new ApiError(400, 'Amount must be greater than zero.');
+  if (req.body.items?.length) throw new ApiError(400, 'Enter physical goods through Stock.');
   const result = await runInTransaction(async (session) => {
     const supplier = await Supplier.findById(supplierId).session(session);
     if (!supplier) throw new ApiError(404, 'Supplier not found.');
-
-    const purchaseItems = [];
-    let totalCostCents = 0;
-
-    for (const line of items) {
-      const item = await InventoryItem.findById(line.itemId).session(session);
-      if (!item) throw new ApiError(404, `Product not found (id: ${line.itemId}).`);
-
-      const qty = Math.round(Number(line.quantity));
-      const unitCostCents = toCents(line.unitCost);
-      const subtotalCents = unitCostCents * qty;
-
-      purchaseItems.push({
-        item: item._id,
-        itemName: item.name,
-        quantity: qty,
-        unitCostCents,
-        subtotalCents,
-      });
-
-      totalCostCents += subtotalCents;
-
-      item.quantity += qty;
-      // Update cost price to the latest purchase cost so future sale profit
-      // calculations reflect current sourcing cost. Past sales keep their
-      // historical cost price untouched.
-      item.costPriceCents = unitCostCents;
-      if (line.updateSellingPrice && Number(line.sellingPrice) >= 0) {
-        item.sellingPriceCents = toCents(line.sellingPrice);
+    const totalCostCents = toCents(amount);
+    const paidAmountCents = totalCostCents;
+    const balanceCents = 0;
+    let account = null;
+    if (paidAmountCents > 0) {
+      if (!purchaseAccountId) throw new ApiError(400, 'Please select the account this purchase is being paid from.');
+      account = await Account.findById(purchaseAccountId).session(session);
+      if (!account || !account.isActive) throw new ApiError(400, 'Selected payment account is not available.');
+      if (account.currentBalanceCents < paidAmountCents) {
+        throw new ApiError(409, `Insufficient balance in ${account.name}.`, {
+          account: account.name,
+          available: fromCents(account.currentBalanceCents),
+          required: fromCents(paidAmountCents),
+          difference: fromCents(paidAmountCents - account.currentBalanceCents),
+        });
       }
-      await item.save({ session });
     }
-
-    let paidAmountCents = toCents(paidAmount);
-    if (paidAmountCents > totalCostCents) paidAmountCents = totalCostCents;
-    const balanceCents = totalCostCents - paidAmountCents;
 
     const purchaseNumber = await generatePurchaseNumber(session);
 
@@ -104,27 +82,37 @@ export const createPurchase = asyncHandler(async (req, res) => {
       [
         {
           purchaseNumber,
+          supplierInvoiceNumber: supplierInvoiceNumber.trim(),
           supplier: supplier._id,
           supplierName: supplier.name,
-          items: purchaseItems,
+          items: [],
           totalCostCents,
           paidAmountCents,
           balanceCents,
-          purchaseDate: purchaseDate ? new Date(purchaseDate) : new Date(),
-          notes,
+          paymentAccount: account?._id || null,
+          purchaseDate: new Date(),
           createdBy: req.user?._id,
         },
       ],
       { session }
     );
 
-    // One traceable lot per line, so supplier/item profitability reports can
-    // always identify exactly which purchase produced a given unit of COGS.
-    for (const line of purchaseItems) {
-      await createLotForPurchase(
-        { item: line.item, supplier: supplier._id, purchase: purchase._id, unitCostCents: line.unitCostCents, quantity: line.quantity },
+    if (account && paidAmountCents > 0) {
+      const txn = await postImmediateTransaction(
+        {
+          account,
+          direction: 'OUT',
+          type: 'PURCHASE_PAYMENT',
+          amountCents: paidAmountCents,
+          referenceType: 'Purchase',
+          referenceId: purchase._id,
+          description: `Purchase invoice ${purchaseNumber} (${supplier.name})`,
+          createdBy: req.user,
+        },
         session
       );
+      purchase.accountTransaction = txn?._id || null;
+      await purchase.save({ session });
     }
 
     supplier.totalSpentCents += totalCostCents;
@@ -159,6 +147,7 @@ export const listPurchases = asyncHandler(async (req, res) => {
 
   const [items, total] = await Promise.all([
     Purchase.find(filter)
+      .populate('paymentAccount', 'name')
       .sort({ createdAt: -1 })
       .skip((pageNum - 1) * limitNum)
       .limit(limitNum),
@@ -173,7 +162,7 @@ export const listPurchases = asyncHandler(async (req, res) => {
 });
 
 export const getPurchase = asyncHandler(async (req, res) => {
-  const purchase = await Purchase.findById(req.params.id);
+  const purchase = await Purchase.findById(req.params.id).populate('paymentAccount', 'name');
   if (!purchase) throw new ApiError(404, 'Purchase not found.');
   res.json({ success: true, data: toDTO(purchase) });
 });
@@ -189,7 +178,7 @@ export const voidPurchase = asyncHandler(async (req, res) => {
 
     const lots = await InventoryLot.find({ purchase: purchase._id }).session(session);
     for (const lot of lots) {
-      if (lot.remainingQuantity < lot.originalQuantity) {
+      if (lot.remainingQuantity < lot.originalQuantity || lot.reservedQuantity > 0) {
         throw new ApiError(
           409,
           `Cannot void this purchase: some of its stock has already been sold, so the original batch can no longer be fully reversed.`
@@ -217,6 +206,27 @@ export const voidPurchase = asyncHandler(async (req, res) => {
     if (supplier) {
       supplier.totalSpentCents -= purchase.totalCostCents;
       await supplier.save({ session });
+    }
+
+    // Refund the money back into the account it was paid from, rather than
+    // deleting that account's history.
+    if (purchase.paymentAccount && purchase.paidAmountCents > 0) {
+      const account = await Account.findById(purchase.paymentAccount).session(session);
+      if (account) {
+        await postImmediateTransaction(
+          {
+            account,
+            direction: 'IN',
+            type: 'REFUND',
+            amountCents: purchase.paidAmountCents,
+            referenceType: 'Purchase',
+            referenceId: purchase._id,
+            description: `Refund for voided purchase ${purchase.purchaseNumber}${reason ? ` (${reason})` : ''}`,
+            createdBy: req.user,
+          },
+          session
+        );
+      }
     }
 
     purchase.status = 'voided';

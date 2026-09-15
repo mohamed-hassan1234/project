@@ -38,6 +38,6 @@ export function expiryStatusBadge(status) {
     case 'ok':
       return { color: 'green', label: 'OK' };
     default:
-      return null;
+      return { color: 'slate', label: status || 'Unknown' };
   }
 }

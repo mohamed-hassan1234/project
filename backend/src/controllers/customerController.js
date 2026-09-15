@@ -150,7 +150,7 @@ export const deleteCustomer = asyncHandler(async (req, res) => {
   const customer = await Customer.findById(req.params.id);
   if (!customer) throw new ApiError(404, 'Customer not found.');
 
-  const saleCount = await Sale.countDocuments({ customer: customer._id, status: 'completed' });
+  const saleCount = await Sale.countDocuments({ customer: customer._id, status: 'CONFIRMED' });
   if (saleCount > 0) {
     throw new ApiError(
       409,
@@ -240,7 +240,7 @@ export const getCustomerDebt = asyncHandler(async (req, res) => {
   const customer = await Customer.findById(req.params.id);
   if (!customer) throw new ApiError(404, 'Customer not found.');
 
-  const invoices = await Sale.find({ customer: customer._id, status: 'completed', outstandingCents: { $gt: 0 } })
+  const invoices = await Sale.find({ customer: customer._id, status: 'CONFIRMED', outstandingCents: { $gt: 0 } })
     .sort({ createdAt: 1 })
     .select('receiptNumber totalCents paidAmountCents outstandingCents createdAt');
 
@@ -276,7 +276,7 @@ export const payCustomerDebt = asyncHandler(async (req, res) => {
 
     const outstandingInvoices = await Sale.find({
       customer: customer._id,
-      status: 'completed',
+      status: 'CONFIRMED',
       outstandingCents: { $gt: 0 },
     })
       .sort({ createdAt: 1 })
@@ -381,6 +381,102 @@ export const payCustomerDebt = asyncHandler(async (req, res) => {
   res.status(201).json({
     success: true,
     data: { customer: toDTO(result.customer), paymentId: result.payment._id, receiptNumber: result.payment.receiptNumber },
+  });
+});
+
+// GET /api/customers/:id/statement?from=&to= -- ONE consolidated document:
+// every CONFIRMED invoice and every payment from the customer's join date
+// (or a custom range) through today, merged into a single running-balance
+// ledger. Draft invoices are deliberately excluded from the finalized
+// totals/ledger and returned separately as "pendingToday" so they are never
+// mistaken for posted debt/revenue.
+export const getCustomerStatement = asyncHandler(async (req, res) => {
+  const customer = await Customer.findById(req.params.id);
+  if (!customer) throw new ApiError(404, 'Customer not found.');
+
+  const from = req.query.from ? new Date(req.query.from) : new Date(customer.createdAt);
+  const to = req.query.to ? new Date(req.query.to) : new Date();
+  if (req.query.to && req.query.to.length <= 10) to.setHours(23, 59, 59, 999);
+
+  const [sales, payments, todaysDrafts] = await Promise.all([
+    Sale.find({ customer: customer._id, status: 'CONFIRMED', createdAt: { $gte: from, $lte: to } }).sort({ createdAt: 1 }),
+    Payment.find({ customer: customer._id, createdAt: { $gte: from, $lte: to } }).sort({ createdAt: 1 }),
+    Sale.find({ customer: customer._id, status: 'DRAFT' }).sort({ createdAt: -1 }),
+  ]);
+
+  // Merge into one chronological, double-entry ledger: a confirmed sale is a
+  // debit (increases what the customer owes), a payment is a credit.
+  const entries = [
+    ...sales.map((s) => ({
+      date: s.createdAt,
+      reference: s.receiptNumber,
+      type: 'SALE',
+      description: `Sale invoice ${s.receiptNumber}`,
+      debitCents: s.totalCents,
+      creditCents: 0,
+      saleId: s._id,
+    })),
+    ...payments.map((p) => ({
+      date: p.createdAt,
+      reference: p.receiptNumber,
+      type: p.type === 'sale' ? 'SALE_PAYMENT' : 'PAYMENT',
+      description: p.type === 'sale' ? `Payment received at sale (${p.receiptNumber})` : `Debt payment ${p.receiptNumber}`,
+      debitCents: 0,
+      creditCents: p.amountCents,
+      paymentId: p._id,
+    })),
+  ].sort((a, b) => new Date(a.date) - new Date(b.date));
+
+  let runningBalanceCents = customer.openingBalanceCents;
+  const ledger = entries.map((e) => {
+    runningBalanceCents += e.debitCents - e.creditCents;
+    return {
+      date: e.date,
+      reference: e.reference,
+      type: e.type,
+      description: e.description,
+      debit: fromCents(e.debitCents),
+      credit: fromCents(e.creditCents),
+      runningBalance: fromCents(runningBalanceCents),
+    };
+  });
+
+  const totalAmountPurchasedCents = sales.reduce((sum, s) => sum + s.totalCents, 0);
+  const totalPaymentsCents = payments.reduce((sum, p) => sum + p.amountCents, 0);
+  const totalCreditGeneratedCents = sales.reduce((sum, s) => sum + s.balanceAddedCents, 0);
+
+  res.json({
+    success: true,
+    data: {
+      customer: { ...toDTO(customer), since: customer.createdAt },
+      range: { from, to },
+      summary: {
+        customerSince: customer.createdAt,
+        totalConfirmedPurchases: sales.length,
+        totalAmountPurchased: fromCents(totalAmountPurchasedCents),
+        totalPayments: fromCents(totalPaymentsCents),
+        totalCreditGenerated: fromCents(totalCreditGeneratedCents),
+        currentOutstandingBalance: fromCents(customer.balanceCents),
+        numberOfFinalizedInvoices: sales.length,
+      },
+      ledger,
+      invoices: sales.map((s) => ({
+        id: s._id,
+        receiptNumber: s.receiptNumber,
+        createdAt: s.createdAt,
+        items: s.items.map((i) => ({ name: i.itemName, quantity: i.quantity, unitPrice: fromCents(i.unitPriceCents), subtotal: fromCents(i.subtotalCents) })),
+        total: fromCents(s.totalCents),
+        paidAmount: fromCents(s.paidAmountCents),
+        balance: fromCents(s.balanceAddedCents),
+      })),
+      pendingToday: todaysDrafts.map((s) => ({
+        id: s._id,
+        receiptNumber: s.receiptNumber,
+        createdAt: s.createdAt,
+        total: fromCents(s.totalCents),
+        paidAmount: fromCents(s.paidAmountCents),
+      })),
+    },
   });
 });
 

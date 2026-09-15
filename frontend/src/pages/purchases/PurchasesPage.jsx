@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Plus, Ban } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Plus, Ban, Printer } from 'lucide-react';
 import client from '../../api/client.js';
 import { useAuth } from '../../context/AuthContext.jsx';
 import { useToast } from '../../context/ToastContext.jsx';
@@ -56,11 +57,11 @@ export default function PurchasesPage() {
   return (
     <div>
       <PageHeader
-        title="Purchases"
-        subtitle="Record stock purchases from suppliers"
+        title="Purchase Invoices"
+        subtitle="Record invoices for goods purchased from suppliers"
         actions={
           <Button onClick={() => setFormOpen(true)}>
-            <Plus className="h-4 w-4" /> New Purchase
+            <Plus className="h-4 w-4" /> New Purchase Invoice
           </Button>
         }
       />
@@ -68,44 +69,48 @@ export default function PurchasesPage() {
       <Table>
         <THead>
           <tr>
-            <Th>Purchase #</Th>
+            <Th>Internal Invoice</Th>
+            <Th>Supplier Invoice</Th>
             <Th>Supplier</Th>
-            <Th>Items</Th>
-            <Th>Total Cost</Th>
-            <Th>Balance Owed</Th>
+            <Th>Amount</Th>
+            <Th>Paid From</Th>
             <Th>Date</Th>
             <Th>Status</Th>
-            {canVoid && <Th className="text-right">Actions</Th>}
+            <Th className="text-right">Actions</Th>
           </tr>
         </THead>
         <TBody>
           {loading ? (
             <TableLoading colSpan={8} />
           ) : items.length === 0 ? (
-            <TableEmpty colSpan={8} message="No purchases recorded yet." />
+            <TableEmpty colSpan={8} message="No purchase invoices recorded yet." />
           ) : (
             items.map((p) => (
               <tr key={p.id} className="hover:bg-slate-50">
                 <Td className="font-medium text-slate-900">{p.purchaseNumber}</Td>
+                <Td>{p.supplierInvoiceNumber || '—'}</Td>
                 <Td>{p.supplierName}</Td>
-                <Td>{p.items.length} item(s)</Td>
-                <Td>{formatCurrency(p.totalCost)}</Td>
-                <Td>{p.balance > 0 ? <span className="font-semibold text-rose-600">{formatCurrency(p.balance)}</span> : '—'}</Td>
+                <Td>
+                  {formatCurrency(p.totalCost)}
+                  {p.balance > 0 && <div className="text-xs font-semibold text-rose-600">Owed: {formatCurrency(p.balance)}</div>}
+                </Td>
+                <Td>{p.paymentAccountName || '—'}</Td>
                 <Td>{formatDateTime(p.createdAt)}</Td>
                 <Td>
                   <Badge color={p.status === 'voided' ? 'red' : 'green'}>{p.status === 'voided' ? 'Voided' : 'Completed'}</Badge>
                 </Td>
-                {canVoid && (
-                  <Td>
-                    <div className="flex justify-end">
-                      {p.status !== 'voided' && (
-                        <button onClick={() => setVoidItem(p)} className="rounded-md p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600" title="Void purchase">
-                          <Ban className="h-4 w-4" />
-                        </button>
-                      )}
-                    </div>
-                  </Td>
-                )}
+                <Td>
+                  <div className="flex justify-end gap-1">
+                    <Link to={`/purchases/${p.id}/receipt`} className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600" title="Print">
+                      <Printer className="h-4 w-4" />
+                    </Link>
+                    {canVoid && p.status !== 'voided' && (
+                      <button onClick={() => setVoidItem(p)} className="rounded-md p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600" title="Void purchase">
+                        <Ban className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
+                </Td>
               </tr>
             ))
           )}

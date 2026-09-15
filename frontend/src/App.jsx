@@ -1,3 +1,4 @@
+import StockPage from './pages/stock/StockPage.jsx';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext.jsx';
 import { ToastProvider } from './context/ToastContext.jsx';
@@ -10,14 +11,18 @@ import InventoryPage from './pages/inventory/InventoryPage.jsx';
 import InventoryPrintPage from './pages/inventory/InventoryPrintPage.jsx';
 import CategoriesPage from './pages/categories/CategoriesPage.jsx';
 import POSPage from './pages/pos/POSPage.jsx';
+import CloseDayPage from './pages/pos/CloseDayPage.jsx';
 import PurchasesPage from './pages/purchases/PurchasesPage.jsx';
 import CustomersPage from './pages/customers/CustomersPage.jsx';
 import CustomerDetailPage from './pages/customers/CustomerDetailPage.jsx';
+import CustomerStatementPage from './pages/customers/CustomerStatementPage.jsx';
 import SuppliersPage from './pages/suppliers/SuppliersPage.jsx';
 import SupplierDetailPage from './pages/suppliers/SupplierDetailPage.jsx';
+import AccountsPage from './pages/accounts/AccountsPage.jsx';
 import ReportsPage from './pages/reports/ReportsPage.jsx';
 import ReceiptPage from './pages/receipt/ReceiptPage.jsx';
 import PaymentReceiptPage from './pages/receipt/PaymentReceiptPage.jsx';
+import PurchaseReceiptPage from './pages/receipt/PurchaseReceiptPage.jsx';
 import NotFound from './pages/NotFound.jsx';
 
 export default function App() {
@@ -40,11 +45,16 @@ export default function App() {
               <Route path="/inventory/:id/print" element={<InventoryPrintPage />} />
               <Route path="/categories" element={<CategoriesPage />} />
               <Route path="/pos" element={<POSPage />} />
+              <Route path="/pos/close-day" element={<CloseDayPage />} />
+              <Route path="/stock" element={<StockPage />} />
               <Route path="/purchases" element={<PurchasesPage />} />
+              <Route path="/purchases/:id/receipt" element={<PurchaseReceiptPage />} />
               <Route path="/customers" element={<CustomersPage />} />
               <Route path="/customers/:id" element={<CustomerDetailPage />} />
+              <Route path="/customers/:id/statement" element={<CustomerStatementPage />} />
               <Route path="/suppliers" element={<SuppliersPage />} />
               <Route path="/suppliers/:id" element={<SupplierDetailPage />} />
+              <Route path="/accounts" element={<AccountsPage />} />
               <Route path="/reports" element={<ReportsPage />} />
               <Route path="/receipt/:id" element={<ReceiptPage />} />
               <Route path="/payment-receipt/:id" element={<PaymentReceiptPage />} />

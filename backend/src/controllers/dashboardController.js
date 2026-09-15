@@ -28,7 +28,7 @@ export const getDashboard = asyncHandler(async (req, res) => {
     topSellingAgg,
   ] = await Promise.all([
     Sale.aggregate([
-      { $match: { status: 'completed', createdAt: { $gte: today.start, $lte: today.end } } },
+      { $match: { status: 'CONFIRMED', createdAt: { $gte: today.start, $lte: today.end } } },
       { $group: { _id: null, revenue: { $sum: '$totalCents' }, profit: { $sum: '$profitCents' }, count: { $sum: 1 } } },
     ]),
     InventoryItem.aggregate([
@@ -52,7 +52,7 @@ export const getDashboard = asyncHandler(async (req, res) => {
       { $group: { _id: null, totalDebt: { $sum: '$balanceCents' } } },
     ]),
     Sale.aggregate([
-      { $match: { status: 'completed', createdAt: { $gte: last14 } } },
+      { $match: { status: 'CONFIRMED', createdAt: { $gte: last14 } } },
       {
         $group: {
           _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
@@ -63,7 +63,7 @@ export const getDashboard = asyncHandler(async (req, res) => {
       { $sort: { _id: 1 } },
     ]),
     Sale.aggregate([
-      { $match: { status: 'completed', createdAt: { $gte: last12MonthsStart } } },
+      { $match: { status: 'CONFIRMED', createdAt: { $gte: last12MonthsStart } } },
       {
         $group: {
           _id: { $dateToString: { format: '%Y-%m', date: '$createdAt' } },
@@ -74,7 +74,7 @@ export const getDashboard = asyncHandler(async (req, res) => {
       { $sort: { _id: 1 } },
     ]),
     Sale.aggregate([
-      { $match: { status: 'completed', createdAt: { $gte: last14 } } },
+      { $match: { status: 'CONFIRMED', createdAt: { $gte: last14 } } },
       { $unwind: '$items' },
       {
         $group: {

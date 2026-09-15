@@ -1,3 +1,6 @@
+import { useEffect, useState } from 'react';
+import client from '../../api/client.js';
+import BatchHistory from '../../components/BatchHistory.jsx';
 import { useNavigate } from 'react-router-dom';
 import { Printer } from 'lucide-react';
 import Modal from '../../components/ui/Modal.jsx';
@@ -14,8 +17,15 @@ function Row({ label, value }) {
   );
 }
 
-export default function InventoryDetailsModal({ open, onClose, item }) {
+export default function InventoryDetailsModal({ open, onClose, item: summaryItem }) {
   const navigate = useNavigate();
+  const [details, setDetails] = useState(null);
+  useEffect(() => {
+    let active = true;
+    if (open && summaryItem) client.get(`/inventory/${summaryItem.id}`).then(r => { if (active) setDetails(r.data.data); }).catch(() => {});
+    return () => { active = false; };
+  }, [open, summaryItem]);
+  const item = details?.id === summaryItem?.id ? details : summaryItem;
   if (!item) return null;
   const stock = stockStatusBadge(item.stockStatus);
   const expiry = expiryStatusBadge(item.expiryStatus);
@@ -25,7 +35,7 @@ export default function InventoryDetailsModal({ open, onClose, item }) {
       open={open}
       onClose={onClose}
       title={item.name}
-      size="md"
+      size="xl"
       footer={
         <Button onClick={() => navigate(`/inventory/${item.id}/print`)}>
           <Printer className="h-4 w-4" /> Print Item Record
@@ -47,6 +57,7 @@ export default function InventoryDetailsModal({ open, onClose, item }) {
       <Row label="Expiry Date" value={item.expiryDate ? formatDate(item.expiryDate) : '—'} />
       <Row label="Created" value={formatDate(item.createdAt)} />
       <Row label="Last Updated" value={formatDate(item.updatedAt)} />
+      <BatchHistory item={item} />
     </Modal>
   );
 }

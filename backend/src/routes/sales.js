@@ -1,14 +1,26 @@
 import { Router } from 'express';
 import { requireAuth, requireRole } from '../middleware/auth.js';
-import { createSale, listSales, getSale, getReceipt, voidSale } from '../controllers/saleController.js';
+import {
+  createSale,
+  updateSale,
+  cancelSale,
+  listTodayDrafts,
+  listSales,
+  getSale,
+  getReceipt,
+  reverseSale,
+} from '../controllers/saleController.js';
 
 const router = Router();
 router.use(requireAuth);
 
+router.get('/drafts/today', listTodayDrafts);
 router.get('/', listSales);
 router.post('/', createSale);
 router.get('/:id', getSale);
 router.get('/:id/receipt', getReceipt);
-router.post('/:id/void', requireRole('admin', 'manager'), voidSale);
+router.put('/:id', updateSale);
+router.post('/:id/cancel', cancelSale);
+router.post('/:id/reverse', requireRole('admin', 'manager'), reverseSale);
 
 export default router;

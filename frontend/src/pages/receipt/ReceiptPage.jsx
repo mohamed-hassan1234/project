@@ -1,19 +1,31 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
-import { Printer, ArrowLeft } from 'lucide-react';
+import { useParams, Link, useNavigate } from 'react-router-dom';
+import { Printer, ArrowLeft, Pencil, XCircle } from 'lucide-react';
 import client from '../../api/client.js';
+import { useToast } from '../../context/ToastContext.jsx';
 import { formatCurrency, formatDate, formatTime } from '../../utils/format.js';
 import { printA5 } from '../../utils/printA5.js';
 import { BUSINESS } from '../../constants/business.js';
 import { PageSpinner } from '../../components/ui/Spinner.jsx';
 import Button from '../../components/ui/Button.jsx';
 import Badge from '../../components/ui/Badge.jsx';
+import ConfirmDialog from '../../components/ui/ConfirmDialog.jsx';
 import logo from '../../images/logo.png';
+
+const STATUS_BADGE = {
+  DRAFT: { color: 'amber', label: 'PENDING' },
+  CONFIRMED: { color: 'green', label: 'CONFIRMED' },
+  CANCELLED: { color: 'red', label: 'CANCELLED' },
+};
 
 export default function ReceiptPage() {
   const { id } = useParams();
+  const navigate = useNavigate();
+  const toast = useToast();
   const [sale, setSale] = useState(null);
   const [error, setError] = useState('');
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
 
   const load = useCallback(() => {
     client
@@ -24,10 +36,25 @@ export default function ReceiptPage() {
 
   useEffect(() => load(), [load]);
 
+  const handleCancel = async () => {
+    setCancelling(true);
+    try {
+      await client.post(`/sales/${id}/cancel`, { reason: 'Cancelled by seller' });
+      toast.success('Draft invoice cancelled.');
+      setCancelOpen(false);
+      load();
+    } catch (err) {
+      toast.error(err.friendlyMessage || 'Could not cancel this draft.');
+    } finally {
+      setCancelling(false);
+    }
+  };
+
   if (error) return <div className="rounded-lg bg-rose-50 p-4 text-sm text-rose-700">{error}</div>;
   if (!sale) return <PageSpinner />;
 
   const currentOutstanding = sale.newBalance;
+  const statusBadge = STATUS_BADGE[sale.status] || { color: 'slate', label: sale.status };
 
   return (
     <div>
@@ -36,11 +63,31 @@ export default function ReceiptPage() {
           <ArrowLeft className="h-4 w-4" /> Back to POS
         </Link>
         <div className="flex gap-2">
+          {sale.status === 'DRAFT' && (
+            <>
+              <Button variant="secondary" onClick={() => navigate(`/pos?edit=${sale.id}`)}>
+                <Pencil className="h-4 w-4" /> Edit
+              </Button>
+              <Button variant="danger" onClick={() => setCancelOpen(true)}>
+                <XCircle className="h-4 w-4" /> Cancel
+              </Button>
+            </>
+          )}
           <Button onClick={printA5}>
             <Printer className="h-4 w-4" /> Print Invoice
           </Button>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={cancelOpen}
+        title="Cancel Draft Invoice"
+        message="Cancel this draft invoice? Reserved stock and any pending payment will be released."
+        confirmLabel="Cancel Draft"
+        loading={cancelling}
+        onConfirm={handleCancel}
+        onClose={() => setCancelOpen(false)}
+      />
 
       <div
         id="print-area"
@@ -52,6 +99,21 @@ export default function ReceiptPage() {
           <p className="text-xs text-slate-500">{BUSINESS.addressLine}</p>
           <p className="text-xs text-slate-500">{BUSINESS.phone}</p>
         </div>
+
+        <div className="my-3 border-t border-dashed border-slate-300" />
+
+        <div className="flex items-center justify-between">
+          <p className="text-sm font-bold uppercase tracking-wide text-slate-800">Sales Invoice</p>
+          <Badge color={statusBadge.color}>STATUS: {statusBadge.label}</Badge>
+        </div>
+        {sale.status === 'DRAFT' && (
+          <p className="mt-1 text-center text-[11px] font-medium text-amber-600">
+            This invoice is PENDING and will only become final when the business day is closed.
+          </p>
+        )}
+        {sale.status === 'CANCELLED' && sale.cancelledReason && (
+          <p className="mt-1 text-center text-[11px] font-medium text-rose-600">Reason: {sale.cancelledReason}</p>
+        )}
 
         <div className="my-3 border-t border-dashed border-slate-300" />
 
@@ -67,12 +129,6 @@ export default function ReceiptPage() {
             <p className="text-slate-500">{formatDate(sale.createdAt)}, {formatTime(sale.createdAt)}</p>
           </div>
         </div>
-
-        {sale.status === 'voided' && (
-          <div className="mt-2 flex justify-center">
-            <Badge color="red">VOIDED{sale.voidedReason ? `: ${sale.voidedReason}` : ''}</Badge>
-          </div>
-        )}
 
         <div className="my-3 border-t border-dashed border-slate-300" />
 
@@ -120,6 +176,18 @@ export default function ReceiptPage() {
             <span>Paid</span>
             <span>{formatCurrency(sale.paidAmount)}</span>
           </div>
+          {sale.paidAmount > 0 && (
+            <div className="flex justify-between text-slate-500">
+              <span>Payment Method</span>
+              <span>{sale.paymentAccountName || '—'}</span>
+            </div>
+          )}
+          {sale.total - sale.paidAmount > 0 && (
+            <div className="flex justify-between text-slate-500">
+              <span>Balance</span>
+              <span>{formatCurrency(sale.total - sale.paidAmount)}</span>
+            </div>
+          )}
 
           <div className="my-1.5 border-t border-dotted border-slate-200" />
 

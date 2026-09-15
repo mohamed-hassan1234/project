@@ -4,6 +4,7 @@ const DEFAULT_LOW_STOCK_THRESHOLD = 5;
 
 const inventoryItemSchema = new mongoose.Schema(
   {
+    stockEvents: [{ at: { type: Date, default: Date.now }, type: { type: String }, reference: String, quantityBefore: Number, quantityAfter: Number }],
     itemCode: { type: String, required: true, trim: true },
     name: { type: String, required: true, trim: true },
     serialNumber: { type: String, trim: true, default: '' },
@@ -13,7 +14,11 @@ const inventoryItemSchema = new mongoose.Schema(
     barcode: { type: String, trim: true, default: '' },
     category: { type: mongoose.Schema.Types.ObjectId, ref: 'Category', default: null },
     description: { type: String, default: '' },
-    quantity: { type: Number, required: true, default: 0, min: 0 },
+    quantity: { type: Number, required: true, default: 0, min: 0 }, // physical on-hand stock
+    // Held by DRAFT sales so two draft invoices can never both promise the
+    // same unit. Physical `quantity` is only ever decremented when a draft
+    // is CONFIRMED (Close Day) -- never at draft creation time.
+    reservedQuantity: { type: Number, required: true, default: 0, min: 0 },
     unit: { type: String, default: 'pcs' },
     costPriceCents: { type: Number, required: true, default: 0, min: 0 },
     sellingPriceCents: { type: Number, required: true, default: 0, min: 0 },
@@ -39,6 +44,10 @@ inventoryItemSchema.index({ itemCode: 1 }, { unique: true });
 inventoryItemSchema.index({ serialNumber: 1 }, { unique: true, partialFilterExpression: { serialNumber: { $type: 'string', $gt: '' } } });
 inventoryItemSchema.index({ category: 1 });
 inventoryItemSchema.index({ expiryDate: 1 });
+
+inventoryItemSchema.virtual('availableQuantity').get(function computeAvailable() {
+  return Math.max(0, this.quantity - (this.reservedQuantity || 0));
+});
 
 inventoryItemSchema.virtual('stockStatus').get(function computeStockStatus() {
   if (this.quantity <= 0) return 'out_of_stock';

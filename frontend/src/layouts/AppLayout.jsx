@@ -8,6 +8,8 @@ import {
   Users,
   Building2,
   BarChart3,
+  Wallet,
+  FileText,
   LogOut,
   Menu,
   X,
@@ -18,9 +20,12 @@ import logo from '../images/logo.png';
 
 const navItems = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { to: '/stock', label: 'Stock', icon: Boxes },
   { to: '/inventory', label: 'Inventory', icon: Boxes },
   { to: '/categories', label: 'Categories', icon: Tag },
   { to: '/pos', label: 'Seller / POS', icon: ShoppingCart },
+  { to: '/purchases', label: 'Purchase Invoices', icon: FileText },
+  { to: '/accounts', label: 'Accounts', icon: Wallet },
   { to: '/customers', label: 'Customers', icon: Users },
   { to: '/suppliers', label: 'Suppliers', icon: Building2 },
   { to: '/reports', label: 'Reports', icon: BarChart3 },

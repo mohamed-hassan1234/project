@@ -148,8 +148,8 @@ export default function InventoryFormModal({ open, onClose, item, onSaved }) {
         <section>
           <h4 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">Stock Information</h4>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <FormField label="Quantity" error={errors.quantity}>
-              <Input type="number" min="0" value={form.quantity} onChange={set('quantity')} />
+            <FormField label="Quantity (receive goods through Stock)" error={errors.quantity}>
+              <Input type="number" min="0" value={form.quantity} readOnly />
             </FormField>
             <FormField label="Unit">
               <Input value={form.unit} onChange={set('unit')} placeholder="pcs, kg, bag..." />

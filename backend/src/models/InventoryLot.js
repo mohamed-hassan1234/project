@@ -6,6 +6,12 @@ import mongoose from 'mongoose';
 // it, even when the same item has been bought at different costs over time.
 const inventoryLotSchema = new mongoose.Schema(
   {
+    stockEntry: { type: mongoose.Schema.Types.ObjectId, ref: 'StockEntry', default: null },
+    stockSerial: { type: String, default: '' },
+    sellingPriceCents: { type: Number, min: 0, default: null },
+    expiryDate: { type: Date, default: null },
+    receivedAt: { type: Date, default: Date.now },
+    reservedQuantity: { type: Number, min: 0, default: 0 },
     item: { type: mongoose.Schema.Types.ObjectId, ref: 'InventoryItem', required: true },
     supplier: { type: mongoose.Schema.Types.ObjectId, ref: 'Supplier', default: null },
     purchase: { type: mongoose.Schema.Types.ObjectId, ref: 'Purchase', default: null },

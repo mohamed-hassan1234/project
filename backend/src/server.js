@@ -2,6 +2,8 @@ import 'dotenv/config';
 import app from './app.js';
 import { connectDB } from './config/db.js';
 import { migrateInventorySchema } from './utils/migrateInventoryV2.js';
+import { migrateSalesSchema } from './utils/migrateSalesV2.js';
+import { seedDefaultAccounts } from './utils/seedAccounts.js';
 import InventoryItem from './models/InventoryItem.js';
 
 const PORT = process.env.PORT || 5010;
@@ -23,6 +25,8 @@ async function start() {
     validateEnv();
     await connectDB();
     await migrateInventorySchema();
+    await migrateSalesSchema();
+    await seedDefaultAccounts();
     await InventoryItem.syncIndexes();
     // Bind to 0.0.0.0 (not just localhost) so a reverse proxy (Nginx, etc.)
     // running outside this process/container can reach the API.

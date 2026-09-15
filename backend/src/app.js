@@ -1,3 +1,4 @@
+import stockRoutes from './routes/stock.js';
 import express from 'express';
 import cors from 'cors';
 import morgan from 'morgan';
@@ -12,6 +13,8 @@ import saleRoutes from './routes/sales.js';
 import paymentRoutes from './routes/payments.js';
 import reportRoutes from './routes/reports.js';
 import dashboardRoutes from './routes/dashboard.js';
+import accountRoutes from './routes/accounts.js';
+import dayCloseRoutes from './routes/dayClose.js';
 
 import { notFoundHandler, errorHandler } from './middleware/errorHandler.js';
 import { ApiError } from './utils/ApiError.js';
@@ -51,6 +54,7 @@ app.get('/api/health', (req, res) =>
 
 app.use('/api/auth', authRoutes);
 app.use('/api/inventory', inventoryRoutes);
+app.use('/api/stock', stockRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/customers', customerRoutes);
 app.use('/api/suppliers', supplierRoutes);
@@ -59,6 +63,8 @@ app.use('/api/sales', saleRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/accounts', accountRoutes);
+app.use('/api/day-close', dayCloseRoutes);
 
 app.use(notFoundHandler);
 app.use(errorHandler);

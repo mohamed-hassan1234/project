@@ -26,6 +26,6 @@ const paymentSchema = new mongoose.Schema(
 );
 
 paymentSchema.index({ customer: 1, createdAt: -1 });
-paymentSchema.index({ receiptNumber: 1 });
+
 
 export default mongoose.model('Payment', paymentSchema);
