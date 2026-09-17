@@ -10,15 +10,19 @@ import Button from '../../components/ui/Button.jsx';
 // The core POS UX requirement: the seller TYPES a customer name (never
 // browses a dropdown). Matches appear live; if none match, a "Create New
 // Customer" action lets the seller add one without leaving the sale.
-export default function CustomerSearchBox({ activeCustomer, onSelect, onClear, cartTotal = 0, paidAmount = 0 }) {
+export default function CustomerSearchBox({ activeCustomer, onSelect, onClear, cartTotal = 0, paidAmount = 0, searchValue, onSearchChange, enteredCustomer, onEnteredCustomerChange }) {
   const toast = useToast();
-  const [query, setQuery] = useState('');
+  const [localQuery, setLocalQuery] = useState('');
+  const query = searchValue ?? localQuery;
+  const setQuery = onSearchChange || setLocalQuery;
   const debouncedQuery = useDebounce(query, 300);
   const [results, setResults] = useState([]);
   const [searching, setSearching] = useState(false);
   const [showDropdown, setShowDropdown] = useState(false);
   const [showCreateForm, setShowCreateForm] = useState(false);
-  const [newCustomer, setNewCustomer] = useState({ name: '', phone: '' });
+  const [localCustomer, setLocalCustomer] = useState({ name: '', phone: '' });
+  const newCustomer = enteredCustomer ?? localCustomer;
+  const setNewCustomer = onEnteredCustomerChange || setLocalCustomer;
   const [creating, setCreating] = useState(false);
   const boxRef = useRef(null);
 

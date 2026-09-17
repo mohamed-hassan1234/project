@@ -51,6 +51,7 @@ export default function DraftsPanel({ drafts, loading, onChanged }) {
             <span className="text-sm font-bold tabular-nums text-slate-800">{formatCurrency(d.total)}</span>
             <div className="flex gap-1">
               <button
+                disabled={!!d.quotation}
                 onClick={() => navigate(`/pos?edit=${d.id}`)}
                 className="rounded-md p-1.5 text-slate-400 hover:bg-indigo-50 hover:text-indigo-600"
                 title="Open / Edit"

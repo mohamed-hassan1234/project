@@ -1,4 +1,7 @@
 import Customer from '../models/Customer.js';
+import Account from '../models/Account.js';
+import { createHash } from 'node:crypto';
+import { postImmediateTransaction } from '../services/accountService.js';
 import Sale from '../models/Sale.js';
 import Payment from '../models/Payment.js';
 import CustomerLedger from '../models/CustomerLedger.js';
@@ -198,8 +201,10 @@ export const getCustomerHistory = asyncHandler(async (req, res) => {
         receiptNumber: s.receiptNumber,
         status: s.status,
         items: s.items.map((i) => ({
+          item: i.item,
           name: i.itemName,
           quantity: i.quantity,
+          returnedQuantity: i.returnedQuantity || 0,
           unitPrice: fromCents(i.unitPriceCents),
           subtotal: fromCents(i.subtotalCents),
         })),
@@ -209,6 +214,8 @@ export const getCustomerHistory = asyncHandler(async (req, res) => {
         paidAmount: fromCents(s.paidAmountCents),
         balanceAdded: fromCents(s.balanceAddedCents),
         outstanding: fromCents(s.outstandingCents),
+        paymentAccount: s.paymentAccount,
+        returnCount: s.returns?.length || 0,
         createdAt: s.createdAt,
       })),
       payments: payments.map((p) => ({
@@ -266,13 +273,27 @@ export const getCustomerDebt = asyncHandler(async (req, res) => {
 // POST /api/customers/:id/payments  -- pay down debt, allocated to specific invoices
 export const payCustomerDebt = asyncHandler(async (req, res) => {
   const amount = Number(req.body.amount);
-  if (!amount || amount <= 0) throw new ApiError(400, 'Please enter a valid payment amount.');
+  if (!Number.isFinite(amount) || amount <= 0 || !Number.isSafeInteger(toCents(amount)) || toCents(amount) <= 0) throw new ApiError(400, 'Please enter a valid payment amount.');
   const amountCents = toCents(amount);
   const requestedAllocations = Array.isArray(req.body.allocations) ? req.body.allocations : null;
+  if (!req.body.paymentAccountId) throw new ApiError(400, 'Please select an account for this payment.');
+  const requestKey = req.body.requestKey;
+  if (requestKey !== undefined && (typeof requestKey !== 'string' || !/^[\w-]{8,100}$/.test(requestKey))) throw new ApiError(400, 'Invalid payment request reference.');
+  const requestFingerprint = createHash('sha256').update(JSON.stringify([req.params.id, amountCents, req.body.paymentAccountId, requestedAllocations, req.body.notes || ''])).digest('hex');
 
   const result = await runInTransaction(async (session) => {
     const customer = await Customer.findById(req.params.id).session(session);
     if (!customer) throw new ApiError(404, 'Customer not found.');
+
+    if (requestKey) {
+      const existing = await Payment.findOne({ createdBy: req.user._id, requestKey }).session(session);
+      if (existing) {
+        if (existing.requestFingerprint !== requestFingerprint) throw new ApiError(409, 'This payment reference was already used with different details.');
+        return { payment: existing, customer };
+      }
+    }
+    const account = await Account.findById(req.body.paymentAccountId).session(session);
+    if (!account?.isActive) throw new ApiError(400, 'Selected payment account is not available.');
 
     const outstandingInvoices = await Sale.find({
       customer: customer._id,
@@ -302,6 +323,7 @@ export const payCustomerDebt = asyncHandler(async (req, res) => {
       for (const a of requestedAllocations) {
         const sale = bySaleId.get(String(a.saleId));
         if (!sale) throw new ApiError(400, 'One of the selected invoices is no longer outstanding.');
+        if (!Number.isFinite(Number(a.amount)) || Number(a.amount) < 0 || !Number.isSafeInteger(toCents(a.amount))) throw new ApiError(400, 'Invalid invoice allocation amount.');
         const allocCents = toCents(a.amount);
         if (allocCents <= 0) continue;
         if (allocCents > sale.outstandingCents) {
@@ -341,6 +363,10 @@ export const payCustomerDebt = asyncHandler(async (req, res) => {
           customer: customer._id,
           amountCents,
           type: 'debt_payment',
+          paymentAccount: account._id,
+          paymentAccountName: account.name,
+          requestKey,
+          requestFingerprint,
           allocations,
           previousBalanceCents,
           newBalanceCents: customer.balanceCents,
@@ -367,6 +393,9 @@ export const payCustomerDebt = asyncHandler(async (req, res) => {
       { session }
     );
 
+    const transaction = await postImmediateTransaction({ account, direction: 'IN', type: 'CUSTOMER_DEBT_PAYMENT', amountCents, referenceType: 'Payment', referenceId: payment._id, description: `Debt payment ${receiptNumber} — ${customer.name}`, createdBy: req.user }, session);
+    payment.accountTransaction = transaction._id;
+    await payment.save({ session });
     return { payment, customer };
   });
 

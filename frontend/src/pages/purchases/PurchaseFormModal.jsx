@@ -18,7 +18,7 @@ export default function PurchaseFormModal({ open, onClose, onSaved }) {
   const refresh = () => client.get('/accounts').then(r => setAccounts(r.data.data.accounts.filter(a => a.isActive))).catch(() => toast.error('Could not load account balances.'));
   useEffect(() => { if (open) { refresh(); setSupplier(null); setAmount(''); setAccountId(''); setSupplierInvoiceNumber(''); } }, [open]);
   const account = accounts.find(a => a.id === accountId);
-  const insufficient = account && Number(amount) > account.currentBalance;
+  const balanceAfter = account ? account.currentBalance - Number(amount || 0) : null;
   async function save() {
     if (!supplier || !account || !Number.isFinite(Number(amount)) || Number(amount) <= 0) return toast.error('Select supplier, payment account, and a positive amount.');
     setSaving(true);
@@ -35,9 +35,9 @@ export default function PurchaseFormModal({ open, onClose, onSaved }) {
       <FormField label="Supplier Invoice / Serial Number"><Input value={supplierInvoiceNumber} onChange={e => setSupplierInvoiceNumber(e.target.value)} /></FormField>
       <FormField label="Amount" required><Input type="number" min="0.01" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} /></FormField>
       <FormField label="Payment Account" required><Select value={accountId} onChange={e => { setAccountId(e.target.value); refresh(); }}><option value="">Select account</option>{accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</Select></FormField>
-      {account && <div className="rounded-lg bg-slate-50 p-3 text-sm">Available Balance: {formatCurrency(account.currentBalance)}<br />Balance After: {formatCurrency(account.currentBalance - Number(amount || 0))}</div>}
-      {insufficient && <div role="alert" className="rounded-lg bg-rose-50 p-3 text-sm text-rose-700"><strong>INSUFFICIENT BALANCE</strong><p>This account does not have enough balance to pay this invoice.</p><p>Available: {formatCurrency(account.currentBalance)} · Required: {formatCurrency(Number(amount))} · Short: {formatCurrency(Number(amount) - account.currentBalance)}</p><p>Choose another payment account.</p></div>}
-      <div className="flex justify-end gap-2"><Button variant="secondary" onClick={onClose}>Cancel</Button><Button loading={saving} disabled={insufficient || !account} onClick={save}>Save Purchase Invoice</Button></div>
+      {account && <div className={`rounded-lg p-3 text-sm ${balanceAfter < 0 ? 'bg-amber-50 text-amber-800' : 'bg-slate-50'}`}>Available Balance: {formatCurrency(account.currentBalance)}<br />Balance After: <span className={balanceAfter < 0 ? 'font-bold text-rose-600' : ''}>{formatCurrency(balanceAfter)}</span></div>}
+      {balanceAfter < 0 && <div role="alert" className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800"><strong>This account will go negative.</strong><p>Available: {formatCurrency(account.currentBalance)} · Required: {formatCurrency(Number(amount))} · Shortfall: {formatCurrency(Number(amount) - account.currentBalance)}</p><p>The purchase can still be saved — the account balance will carry the shortfall until future receipts cover it.</p></div>}
+      <div className="flex justify-end gap-2"><Button variant="secondary" onClick={onClose}>Cancel</Button><Button loading={saving} disabled={!account} onClick={save}>Save Purchase Invoice</Button></div>
     </div>
   </Modal>;
 }

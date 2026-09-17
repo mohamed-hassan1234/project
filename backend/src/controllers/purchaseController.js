@@ -46,9 +46,10 @@ async function generatePurchaseNumber(session) {
 
 // POST /api/purchases -- purchase invoices are recorded and paid immediately
 // (there is no Draft state for purchases). The payment account is required
-// whenever anything is being paid now, and its balance is checked BEFORE any
-// stock/account mutation happens -- an insufficient account never partially
-// applies and never silently pulls the shortfall from another account.
+// whenever anything is being paid now. The account is allowed to go negative
+// -- a purchase is never rejected for insufficient balance, and the full
+// amount always comes from the one selected account (never split across
+// accounts or silently pulled from another one).
 export const createPurchase = asyncHandler(async (req, res) => {
   const { supplierId, supplierInvoiceNumber = '', amount, purchaseAccountId } = req.body;
   if (typeof supplierInvoiceNumber !== 'string') throw new ApiError(400, 'Supplier invoice number must be text.');
@@ -66,14 +67,8 @@ export const createPurchase = asyncHandler(async (req, res) => {
       if (!purchaseAccountId) throw new ApiError(400, 'Please select the account this purchase is being paid from.');
       account = await Account.findById(purchaseAccountId).session(session);
       if (!account || !account.isActive) throw new ApiError(400, 'Selected payment account is not available.');
-      if (account.currentBalanceCents < paidAmountCents) {
-        throw new ApiError(409, `Insufficient balance in ${account.name}.`, {
-          account: account.name,
-          available: fromCents(account.currentBalanceCents),
-          required: fromCents(paidAmountCents),
-          difference: fromCents(paidAmountCents - account.currentBalanceCents),
-        });
-      }
+      // Negative balances are allowed for purchase payments: the account is
+      // debited for the full amount regardless of its current balance.
     }
 
     const purchaseNumber = await generatePurchaseNumber(session);

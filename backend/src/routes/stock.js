@@ -13,7 +13,8 @@ const router = Router();
 router.use(requireAuth);
 const escapeRegex = value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 router.post('/', asyncHandler(async (req, res) => {
-  const { rows } = req.body;
+  const { rows, externalSerialNumber = '' } = req.body;
+  if (typeof externalSerialNumber !== 'string' || externalSerialNumber.length > 100) throw new ApiError(400, 'Shop/supplier serial number must be text of at most 100 characters.');
   if (!Array.isArray(rows) || !rows.length || rows.length > 200) throw new ApiError(400, 'Enter between 1 and 200 stock rows.');
   for (const [i, row] of rows.entries()) {
     if (!row.itemId && !String(row.name || '').trim()) throw new ApiError(400, `Row ${i + 1}: select or name an item.`);
@@ -25,7 +26,7 @@ router.post('/', asyncHandler(async (req, res) => {
     // This shared counter also serializes concurrent inline item creation.
     const seq = await nextSequence('stockEntry', session);
     const stockSerial = `STK-${new Date().getFullYear()}-${String(seq).padStart(6, '0')}`;
-    const entry = new StockEntry({ stockSerial, createdBy: req.user._id, rows: [] });
+    const entry = new StockEntry({ stockSerial, externalSerialNumber: externalSerialNumber.trim(), createdBy: req.user._id, rows: [] });
     for (const row of rows) {
       const name = String(row.name || '').trim().replace(/\s+/g, ' ');
       let item = row.itemId ? await InventoryItem.findById(row.itemId).session(session) : await InventoryItem.findOne({ name: { $regex: `^${escapeRegex(name)}$`, $options: 'i' } }).session(session);
@@ -51,7 +52,7 @@ router.post('/', asyncHandler(async (req, res) => {
 }));
 router.get('/', asyncHandler(async (req, res) => {
   const q = escapeRegex(String(req.query.q || '').trim());
-  const filter = q ? { $or: [{ stockSerial: { $regex: q, $options: 'i' } }, { 'rows.itemName': { $regex: q, $options: 'i' } }] } : {};
+  const filter = q ? { $or: [{ stockSerial: { $regex: q, $options: 'i' } }, { externalSerialNumber: { $regex: q, $options: 'i' } }, { 'rows.itemName': { $regex: q, $options: 'i' } }] } : {};
   const page = Math.max(1, Number(req.query.page) || 1);
   const data = await StockEntry.find(filter).sort({ createdAt: -1 }).skip((page - 1) * 50).limit(50).populate('rows.batch');
   res.json({ success: true, data, total: await StockEntry.countDocuments(filter) });

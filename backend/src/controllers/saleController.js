@@ -1,10 +1,11 @@
+import { createSaleDraft, validateSaleItems } from '../services/saleService.js';
 import Sale from '../models/Sale.js';
 import Customer from '../models/Customer.js';
 import InventoryItem from '../models/InventoryItem.js';
+import InventoryLot from '../models/InventoryLot.js';
 import Account from '../models/Account.js';
 import Payment from '../models/Payment.js';
 import CustomerLedger from '../models/CustomerLedger.js';
-import { nextSequence } from '../models/Counter.js';
 import { ApiError } from '../utils/ApiError.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { toCents, fromCents } from '../utils/money.js';
@@ -30,6 +31,7 @@ function toDTO(sale) {
       itemCode: i.itemCode,
       serialNumber: i.serialNumber,
       quantity: i.quantity,
+      returnedQuantity: i.returnedQuantity || 0,
       unitPrice: fromCents(i.unitPriceCents),
       subtotal: fromCents(i.subtotalCents),
       allocations: i.lotConsumption,
@@ -50,27 +52,18 @@ function toDTO(sale) {
     cancelledAt: sale.cancelledAt,
     cancelledReason: sale.cancelledReason,
     createdAt: sale.createdAt,
+    updatedAt: sale.updatedAt,
+    quotation: sale.quotation || null,
+    settledPaidAmount: fromCents(sale.status === 'CONFIRMED' ? sale.totalCents - sale.outstandingCents : sale.paidAmountCents),
+    returns: (sale.returns || []).map((r) => ({
+      items: r.items.map((i) => ({ item: i.item, name: i.itemName, quantity: i.quantity, unitPrice: fromCents(i.unitPriceCents) })),
+      amount: fromCents(r.amountCents),
+      debtReduced: fromCents(r.debtReducedCents),
+      refund: fromCents(r.refundCents),
+      reason: r.reason,
+      createdAt: r.createdAt,
+    })),
   };
-}
-
-async function generateReceiptNumber(session) {
-  const seq = await nextSequence('sale', session);
-  const year = new Date().getFullYear();
-  return `INV-${year}-${String(seq).padStart(6, '0')}`;
-}
-
-function validateSaleItems({ items, discount, paidAmount }) {
-  if (!Array.isArray(items) || items.length === 0) {
-    throw new ApiError(400, 'Add at least one product to the sale.');
-  }
-  for (const line of items) {
-    if (!line.itemId) throw new ApiError(400, 'Each sale line must reference a product.');
-    if (!Number.isSafeInteger(Number(line.quantity)) || Number(line.quantity) <= 0) {
-      throw new ApiError(400, 'Quantity must be greater than zero for every product.');
-    }
-  }
-  if (Number(discount) < 0) throw new ApiError(400, 'Discount cannot be negative.');
-  if (Number(paidAmount) < 0) throw new ApiError(400, 'Paid amount cannot be negative.');
 }
 
 // POST /api/sales -- always creates a DRAFT/PENDING invoice. Stock is
@@ -79,106 +72,7 @@ function validateSaleItems({ items, discount, paidAmount }) {
 // COGS, or profit -- those are only posted for real when Close Day confirms
 // this invoice.
 export const createSale = asyncHandler(async (req, res) => {
-  const { customerId, items, discount = 0, paidAmount = 0, paymentAccountId } = req.body;
-  if (!customerId) throw new ApiError(400, 'Please select or create a customer before completing the sale.');
-  validateSaleItems({ items, discount, paidAmount });
-
-  const result = await runInTransaction(async (session) => {
-    const customer = await Customer.findById(customerId).session(session);
-    if (!customer) throw new ApiError(404, 'Customer not found. Please select a valid customer.');
-
-    let account = null;
-    if (paymentAccountId) {
-      account = await Account.findById(paymentAccountId).session(session);
-      if (!account || !account.isActive) throw new ApiError(400, 'Selected payment account is not available.');
-    }
-    // Validated before any stock is reserved: runInTransaction falls back to
-    // no session at all on a standalone (non-replica-set) MongoDB, so a
-    // mid-function throw would NOT roll back reservations already applied.
-    if (toCents(paidAmount) > 0 && !account) {
-      throw new ApiError(400, 'Please select a payment account for the amount being paid.');
-    }
-
-    const saleItems = [];
-    let subtotalCents = 0;
-
-    for (const line of items) {
-      const item = await InventoryItem.findById(line.itemId).session(session);
-      if (!item) throw new ApiError(404, `Product not found (id: ${line.itemId}).`);
-
-      const qty = Math.round(Number(line.quantity));
-      const batchReservations = await reserveStock(item._id, qty, session);
-
-      const unitPriceCents = item.sellingPriceCents;
-      const subtotalLineCents = unitPriceCents * qty;
-
-      saleItems.push({
-        item: item._id,
-        itemName: item.name,
-        itemCode: item.itemCode,
-        serialNumber: item.serialNumber,
-        quantity: qty,
-        unitPriceCents,
-        costPriceCents: item.costPriceCents, // estimate; finalized at Close Day
-        subtotalCents: subtotalLineCents,
-        lotConsumption: [],
-        batchReservations,
-      });
-
-      subtotalCents += subtotalLineCents;
-    }
-
-    const discountCents = Math.min(toCents(discount), subtotalCents);
-    const totalCents = subtotalCents - discountCents;
-    let paidAmountCents = toCents(paidAmount);
-    if (paidAmountCents > totalCents) paidAmountCents = totalCents;
-
-    const receiptNumber = await generateReceiptNumber(session);
-
-    const [sale] = await Sale.create(
-      [
-        {
-          receiptNumber,
-          customer: customer._id,
-          customerName: customer.name,
-          items: saleItems,
-          subtotalCents,
-          discountCents,
-          totalCents,
-          paidAmountCents,
-          paymentAccount: account?._id || null,
-          balanceAddedCents: totalCents - paidAmountCents,
-          outstandingCents: 0, // not posted until CONFIRMED
-          costOfGoodsCents: 0,
-          profitCents: 0,
-          previousBalanceCents: customer.balanceCents, // snapshot for display only
-          status: 'DRAFT',
-          createdBy: req.user?._id,
-        },
-      ],
-      { session }
-    );
-
-    if (paidAmountCents > 0 && account) {
-      const txn = await createPendingTransaction(
-        {
-          account,
-          direction: 'IN',
-          type: 'SALE_PAYMENT',
-          amountCents: paidAmountCents,
-          referenceType: 'Sale',
-          referenceId: sale._id,
-          description: `Draft sale ${receiptNumber} (pending Close Day)`,
-          createdBy: req.user,
-        },
-        session
-      );
-      sale.accountTransaction = txn?._id || null;
-      await sale.save({ session });
-    }
-
-    return sale;
-  });
+  const result = await runInTransaction(session => createSaleDraft(req.body, req.user, session));
 
   await logAudit({
     user: req.user,
@@ -201,6 +95,7 @@ export const updateSale = asyncHandler(async (req, res) => {
   const result = await runInTransaction(async (session) => {
     const sale = await Sale.findById(req.params.id).session(session);
     if (!sale) throw new ApiError(404, 'Sale not found.');
+    if (sale.quotation) throw new ApiError(409, 'Quotation invoices retain their accepted prices and items. Cancel the draft if it is no longer required.');
     if (sale.status !== 'DRAFT') {
       throw new ApiError(409, 'Only pending (Draft) invoices can be edited. This invoice has already been closed.');
     }
@@ -347,6 +242,10 @@ export const listSales = asyncHandler(async (req, res) => {
   const filter = {};
   if (customer) filter.customer = customer;
   if (status) filter.status = status;
+  const literal = value => String(value).slice(0, 150).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  if (req.query.id) filter.receiptNumber = new RegExp(literal(req.query.id), 'i');
+  const nameFilters = [req.query.title, req.query.customerName].filter(Boolean);
+  if (nameFilters.length) filter.$and = nameFilters.map(value => ({ customerName: new RegExp(literal(value), 'i') }));
   if (range || from || to) {
     const { start, end } = resolveDateRange({ range, from, to });
     filter.createdAt = { $gte: start, $lte: end };
@@ -357,7 +256,7 @@ export const listSales = asyncHandler(async (req, res) => {
 
   const [items, total] = await Promise.all([
     Sale.find(filter)
-      .sort({ createdAt: -1 })
+      .sort({ [req.query.sortBy === 'updatedAt' ? 'updatedAt' : 'createdAt']: req.query.sortDir === 'asc' ? 1 : -1, _id: -1 })
       .skip((pageNum - 1) * limitNum)
       .limit(limitNum),
     Sale.countDocuments(filter),
@@ -410,8 +309,13 @@ export const reverseSale = asyncHandler(async (req, res) => {
       );
     }
 
+    // Only the portion not already restored by a prior partial return (see
+    // returnSale) is restored here -- lotConsumption entries are decremented
+    // as returns consume them, so this always reflects what remains.
     for (const line of sale.items) {
-      await InventoryItem.findByIdAndUpdate(line.item, { $inc: { quantity: line.quantity } }, { session });
+      const stillConsumed = line.quantity - (line.returnedQuantity || 0);
+      if (stillConsumed <= 0) continue;
+      await InventoryItem.findByIdAndUpdate(line.item, { $inc: { quantity: stillConsumed } }, { session });
       await restoreLotConsumption(line.lotConsumption, session);
     }
 
@@ -475,6 +379,160 @@ export const reverseSale = asyncHandler(async (req, res) => {
   await logAudit({
     user: req.user,
     action: 'sale.reverse',
+    entityType: 'Sale',
+    entityId: result._id,
+    details: { reason },
+  });
+
+  res.json({ success: true, data: toDTO(result) });
+});
+
+// POST /api/sales/:id/return -- partial return for a CONFIRMED sale
+// (admin/manager). Unlike reverseSale (which voids the whole invoice), this
+// returns a chosen quantity of specific lines: it restores stock into the
+// exact lots those units were consumed from (preserving batch traceability
+// and historical cost -- never today's cost), reduces this invoice's
+// subtotal/discount/total by the returned value, and reconciles the
+// difference by first relieving this invoice's still-unpaid balance, then
+// refunding any remainder that was already paid out of the account the sale
+// was paid into. Blocked if a debt payment has already been allocated
+// against this invoice, same as reverseSale, since that would make the
+// refund destination ambiguous.
+export const returnSale = asyncHandler(async (req, res) => {
+  const { items: returnItems, reason = '' } = req.body;
+  if (!Array.isArray(returnItems) || !returnItems.length) throw new ApiError(400, 'Select at least one item to return.');
+
+  const result = await runInTransaction(async (session) => {
+    const sale = await Sale.findById(req.params.id).session(session);
+    if (!sale) throw new ApiError(404, 'Sale not found.');
+    if (sale.status !== 'CONFIRMED') throw new ApiError(409, 'Only confirmed invoices can have items returned. Cancel a Draft instead.');
+    if (sale.balanceAddedCents > 0 && sale.outstandingCents !== sale.balanceAddedCents) {
+      throw new ApiError(409, 'Cannot return items: a debt payment has already been applied to this invoice. Reverse or reallocate that payment first.');
+    }
+
+    const indexByItem = new Map(sale.items.map((line, index) => [String(line.item), index]));
+    const seen = new Set();
+    let deltaSubtotalCents = 0;
+    let deltaCogsCents = 0;
+    const returnedLines = [];
+    for (const line0 of returnItems) {
+      const index = indexByItem.get(String(line0.itemId));
+      if (index === undefined || seen.has(index)) throw new ApiError(400, 'Select valid, distinct items from this invoice.');
+      seen.add(index);
+      const line = sale.items[index];
+      const qty = Math.round(Number(line0.quantity));
+      if (!Number.isSafeInteger(qty) || qty <= 0) throw new ApiError(400, `Return quantity for "${line.itemName}" must be a positive whole number.`);
+      const returnable = line.quantity - (line.returnedQuantity || 0);
+      if (qty > returnable) throw new ApiError(409, `Cannot return ${qty} of "${line.itemName}": only ${returnable} remain returnable.`);
+      deltaSubtotalCents += qty * line.unitPriceCents;
+      deltaCogsCents += qty * line.costPriceCents;
+      returnedLines.push({ index, qty, line });
+    }
+
+    const newSubtotalCents = sale.subtotalCents - deltaSubtotalCents;
+    const newDiscountCents = Math.min(sale.discountCents, newSubtotalCents);
+    const newTotalCents = newSubtotalCents - newDiscountCents;
+    const deltaCents = sale.totalCents - newTotalCents;
+    const reduceFromOutstanding = Math.min(deltaCents, sale.outstandingCents);
+    const refundCents = deltaCents - reduceFromOutstanding;
+
+    // Validated before any lot/stock mutation: an invoice with no payment
+    // account on file cannot refund an already-paid portion.
+    if (refundCents > 0 && !sale.paymentAccount) {
+      throw new ApiError(409, 'This invoice has no payment account on file to refund the already-paid portion. Contact an administrator.');
+    }
+    let account = null;
+    if (refundCents > 0) {
+      account = await Account.findById(sale.paymentAccount).session(session);
+      if (!account) throw new ApiError(409, 'The payment account for this invoice no longer exists. Contact an administrator.');
+    }
+
+    // Restore stock into the exact lots each line consumed, most-recently
+    // consumed lot first, so batch cost/traceability is never fabricated.
+    // Each lotConsumption entry's quantity is decremented as it is restored
+    // (rather than left untouched), so a later full reverseSale on this same
+    // invoice only restores what these returns have not already restored.
+    for (const { index, qty, line } of returnedLines) {
+      let remaining = qty;
+      for (let i = line.lotConsumption.length - 1; i >= 0 && remaining > 0; i--) {
+        const entry = line.lotConsumption[i];
+        if (entry.quantity <= 0) continue;
+        const take = Math.min(entry.quantity, remaining);
+        await InventoryLot.findByIdAndUpdate(entry.lot, { $inc: { remainingQuantity: take } }, { session });
+        entry.quantity -= take;
+        remaining -= take;
+      }
+      await InventoryItem.findByIdAndUpdate(line.item, { $inc: { quantity: qty } }, { session });
+      sale.items[index].returnedQuantity = (line.returnedQuantity || 0) + qty;
+    }
+
+    sale.subtotalCents = newSubtotalCents;
+    sale.discountCents = newDiscountCents;
+    sale.totalCents = newTotalCents;
+    sale.costOfGoodsCents -= deltaCogsCents;
+    sale.profitCents = sale.totalCents - sale.costOfGoodsCents;
+    sale.balanceAddedCents -= reduceFromOutstanding;
+    sale.outstandingCents -= reduceFromOutstanding;
+    sale.paidAmountCents -= refundCents;
+    sale.returns.push({
+      items: returnedLines.map(({ qty, line }) => ({ item: line.item, itemName: line.itemName, quantity: qty, unitPriceCents: line.unitPriceCents })),
+      amountCents: deltaCents,
+      debtReducedCents: reduceFromOutstanding,
+      refundCents,
+      reason,
+      createdBy: req.user?._id,
+    });
+    await sale.save({ session });
+
+    const customer = await Customer.findById(sale.customer).session(session);
+    if (customer) {
+      const previousBalanceCents = customer.balanceCents;
+      customer.balanceCents -= reduceFromOutstanding;
+      customer.totalPurchasedCents -= deltaCents;
+      customer.totalPaidCents -= refundCents;
+      await customer.save({ session });
+
+      if (reduceFromOutstanding > 0) {
+        await CustomerLedger.create(
+          [
+            {
+              customer: customer._id,
+              type: 'SALE_RETURN',
+              amountCents: -reduceFromOutstanding,
+              sale: sale._id,
+              description: `Return on sale ${sale.receiptNumber}${reason ? ` (${reason})` : ''}`,
+              balanceBeforeCents: previousBalanceCents,
+              balanceAfterCents: previousBalanceCents - reduceFromOutstanding,
+              createdBy: req.user?._id,
+            },
+          ],
+          { session }
+        );
+      }
+    }
+
+    if (account && refundCents > 0) {
+      await postImmediateTransaction(
+        {
+          account,
+          direction: 'OUT',
+          type: 'REFUND',
+          amountCents: refundCents,
+          referenceType: 'Sale',
+          referenceId: sale._id,
+          description: `Refund for return on sale ${sale.receiptNumber}${reason ? ` (${reason})` : ''}`,
+          createdBy: req.user,
+        },
+        session
+      );
+    }
+
+    return sale;
+  });
+
+  await logAudit({
+    user: req.user,
+    action: 'sale.return_items',
     entityType: 'Sale',
     entityId: result._id,
     details: { reason },

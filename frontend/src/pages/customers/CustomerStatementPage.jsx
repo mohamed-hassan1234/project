@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { Fragment, useCallback, useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { ArrowLeft, Printer, Clock } from 'lucide-react';
 import client from '../../api/client.js';
@@ -24,6 +24,12 @@ export default function CustomerStatementPage() {
   const [loading, setLoading] = useState(true);
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
+  const [expandedInvoiceIds, setExpandedInvoiceIds] = useState(new Set());
+  const toggleInvoice = (id) => setExpandedInvoiceIds((previous) => {
+    const next = new Set(previous);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
 
   const load = useCallback(
     (params = {}) => {
@@ -145,23 +151,32 @@ export default function CustomerStatementPage() {
                   </td>
                 </tr>
               ) : (
-                ledger.map((e, i) => (
-                  <tr key={i} className="border-b border-slate-100">
+                ledger.map((e) => {
+                  const invoice = e.type === 'SALE' && invoices.find((inv) => inv.receiptNumber === e.reference);
+                  const expanded = invoice && expandedInvoiceIds.has(invoice.id);
+                  return <Fragment key={`${e.type}-${e.reference}`}>
+                  <tr className="border-b border-slate-100">
                     <td className="py-1.5 pr-2 text-slate-500">{formatDateTime(e.date)}</td>
-                    <td className="py-1.5 pr-2 font-medium text-slate-700">{e.reference}</td>
+                    <td className="py-1.5 pr-2 font-medium text-slate-700">{invoice ? <button type="button" className="cursor-pointer text-indigo-700 hover:underline focus-visible:outline-2" aria-expanded={!!expanded} aria-controls={`invoice-${invoice.id}`} onClick={() => toggleInvoice(invoice.id)}><span className="no-print">{expanded ? '▾' : '▸'} </span>{e.reference}</button> : e.reference}</td>
                     <td className="py-1.5 pr-2 text-slate-600">{TYPE_LABEL[e.type] || e.type}</td>
                     <td className="py-1.5 pr-2 text-right text-slate-700">{e.debit > 0 ? formatCurrency(e.debit) : '-'}</td>
                     <td className="py-1.5 pr-2 text-right text-slate-700">{e.credit > 0 ? formatCurrency(e.credit) : '-'}</td>
                     <td className="py-1.5 text-right font-semibold text-slate-900">{formatCurrency(e.runningBalance)}</td>
                   </tr>
-                ))
+                  {invoice && <tr id={`invoice-${invoice.id}`} className={`${expanded ? '' : 'hidden'} no-print`}><td colSpan={6} className="bg-slate-50 p-3">
+                    <p className="mb-2 font-semibold">Invoice Items</p>
+                    {invoice.items.map((item, index) => <div key={`${invoice.id}-${index}`} className="mb-1 flex flex-wrap justify-between gap-2"><span>{item.name} × {item.quantity}</span><span>Unit Price: {formatCurrency(item.unitPrice)} · Total: {formatCurrency(item.subtotal)}</span></div>)}
+                    <div className="mt-2 flex flex-wrap gap-4 font-semibold"><span>Invoice Total: {formatCurrency(invoice.total)}</span><span>Paid: {formatCurrency(invoice.paidAmount)}</span><span>Balance: {formatCurrency(invoice.balance)}</span></div>
+                  </td></tr>}
+                  </Fragment>;
+                })
               )}
             </tbody>
           </table>
         </div>
 
         {invoices.length > 0 && (
-          <div className="mt-6" style={{ pageBreakBefore: 'always' }}>
+          <div className="mt-6 hidden print:block" style={{ pageBreakBefore: 'always' }}>
             <p className="mb-2 text-sm font-bold uppercase tracking-wide text-slate-700">Invoice Detail</p>
             <div className="space-y-3">
               {invoices.map((inv) => (

@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { quotationReport } from '../controllers/quotationController.js';
 import { requireAuth } from '../middleware/auth.js';
 import {
   salesReport,
@@ -15,6 +16,7 @@ const router = Router();
 router.use(requireAuth);
 
 router.get('/sales', salesReport);
+router.get('/quotations', quotationReport);
 router.get('/profit', profitReport);
 router.get('/profit/items/:itemId', profitByItemDrilldown);
 router.get('/inventory', inventoryReport);

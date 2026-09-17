@@ -70,6 +70,7 @@ export default function PaymentReceiptPage() {
           <p className="text-2xl font-bold text-emerald-700">{formatCurrency(payment.amount)}</p>
         </div>
 
+        <p className="mt-3 text-sm">Payment Account: <strong>{payment.paymentAccountName || 'Not recorded (historical payment)'}</strong></p>
         {payment.allocations.length > 0 && (
           <div className="mt-3">
             <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">Applied To</p>

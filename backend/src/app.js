@@ -1,4 +1,5 @@
 import stockRoutes from './routes/stock.js';
+import quotationRoutes from './routes/quotations.js';
 import express from 'express';
 import cors from 'cors';
 import morgan from 'morgan';
@@ -60,6 +61,7 @@ app.use('/api/customers', customerRoutes);
 app.use('/api/suppliers', supplierRoutes);
 app.use('/api/purchases', purchaseRoutes);
 app.use('/api/sales', saleRoutes);
+app.use('/api/quotations', quotationRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/dashboard', dashboardRoutes);

@@ -24,6 +24,7 @@ const navItems = [
   { to: '/inventory', label: 'Inventory', icon: Boxes },
   { to: '/categories', label: 'Categories', icon: Tag },
   { to: '/pos', label: 'Seller / POS', icon: ShoppingCart },
+  { to: '/quotations', label: 'Quotation', icon: FileText },
   { to: '/purchases', label: 'Purchase Invoices', icon: FileText },
   { to: '/accounts', label: 'Accounts', icon: Wallet },
   { to: '/customers', label: 'Customers', icon: Users },

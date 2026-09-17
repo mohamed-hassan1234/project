@@ -44,7 +44,8 @@ function AccountCard({ account, active, onClick }) {
         </div>
         {!account.isActive && <Badge color="slate">Inactive</Badge>}
       </div>
-      <p className="mt-3 text-2xl font-bold tabular-nums text-slate-900">{formatCurrency(account.currentBalance)}</p>
+      <p className={`mt-3 text-2xl font-bold tabular-nums ${account.currentBalance < 0 ? 'text-rose-600' : 'text-slate-900'}`}>{formatCurrency(account.currentBalance)}</p>
+      {account.currentBalance < 0 && <p className="mt-0.5 text-xs font-semibold text-rose-600">Negative balance</p>}
       {account.pendingToday !== 0 && (
         <p className={`mt-1 text-xs font-medium ${account.pendingToday > 0 ? 'text-amber-600' : 'text-rose-600'}`}>
           Pending Today: {account.pendingToday > 0 ? '+' : ''}

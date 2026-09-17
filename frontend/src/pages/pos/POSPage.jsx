@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { draftKey, readDraft, writeDraft, clearDraft } from '../../utils/posDraft.js';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { ShoppingCart, ClipboardList, Lock, Pencil } from 'lucide-react';
 import client from '../../api/client.js';
@@ -22,15 +23,23 @@ export default function POSPage() {
   const canCloseDay = user?.role === 'admin' || user?.role === 'manager';
   const [searchParams] = useSearchParams();
   const editId = searchParams.get('edit');
+  const quotationId = searchParams.get('quotation');
+  const storageKey = draftKey(user.id, editId ? `edit:${editId}` : quotationId ? `quotation:${quotationId}` : 'new');
+  const [restored] = useState(() => readDraft(storageKey));
+  const submitLock = useRef(false);
+  const [customerQuery, setCustomerQuery] = useState(restored?.customerQuery || '');
+  const [enteredCustomer, setEnteredCustomer] = useState(restored?.enteredCustomer || { name: '', phone: '' });
+  const [quotation, setQuotation] = useState(restored?.quotation || null);
+  const [storageWarning, setStorageWarning] = useState(false);
 
-  const [customer, setCustomer] = useState(null);
-  const [lines, setLines] = useState([]);
-  const [discount, setDiscount] = useState('0');
-  const [paidAmount, setPaidAmount] = useState('');
-  const [paymentAccountId, setPaymentAccountId] = useState(null);
+  const [customer, setCustomer] = useState(restored?.customer || null);
+  const [lines, setLines] = useState(restored?.lines || []);
+  const [discount, setDiscount] = useState(restored?.discount ?? '0');
+  const [paidAmount, setPaidAmount] = useState(restored?.paidAmount ?? '');
+  const [paymentAccountId, setPaymentAccountId] = useState(restored?.paymentAccountId || null);
   const [submitting, setSubmitting] = useState(false);
   const [loadingDraft, setLoadingDraft] = useState(false);
-  const [editReceiptNumber, setEditReceiptNumber] = useState('');
+  const [editReceiptNumber, setEditReceiptNumber] = useState(restored?.editReceiptNumber || '');
 
   const [drafts, setDrafts] = useState([]);
   const [draftsLoading, setDraftsLoading] = useState(true);
@@ -48,7 +57,7 @@ export default function POSPage() {
 
   // Edit mode: load an existing Draft's items/customer/payment into the cart.
   useEffect(() => {
-    if (!editId) return;
+    if (!editId || restored) return;
     setLoadingDraft(true);
     (async () => {
       try {
@@ -94,6 +103,36 @@ export default function POSPage() {
     })();
   }, [editId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEffect(() => {
+    if (!quotationId || restored?.quotation) return;
+    let active = true;
+    setLoadingDraft(true);
+    (async () => {
+      try {
+        const { data: response } = await client.get(`/quotations/${quotationId}`);
+        const q = response.data;
+        if (q.convertedInvoice) { navigate(`/receipt/${q.convertedInvoice}`, { replace: true }); return; }
+        if (q.status !== 'Accepted') throw new Error('Only accepted, unexpired quotations can be converted.');
+        const [customerResult, ...products] = await Promise.all([client.get(`/customers/${q.customer}`), ...q.items.map(i => client.get(`/inventory/${i.itemId}`))]);
+        if (!active) return;
+        setCustomer(customerResult.data.data);
+        setLines(q.items.map((i, index) => ({ ...i, available: products[index].data.data.availableQuantity })));
+        setDiscount(String(q.totalDiscount));
+        setQuotation(q);
+      } catch (err) { if (active) toast.error(err.friendlyMessage || err.message || 'Unable to load quotation.'); }
+      finally { if (active) setLoadingDraft(false); }
+    })();
+    return () => { active = false; };
+  }, [quotationId]);
+
+  useEffect(() => {
+    if (loadingDraft || (quotationId && !quotation)) return;
+    if (customer || lines.length || customerQuery || enteredCustomer.name || enteredCustomer.phone || paidAmount || Number(discount)) {
+      const saved = writeDraft(storageKey, { customer, lines, discount, paidAmount, paymentAccountId, customerQuery, enteredCustomer, quotation, editReceiptNumber });
+      setStorageWarning(!saved);
+    } else clearDraft(storageKey);
+  }, [storageKey, customer, lines, discount, paidAmount, paymentAccountId, customerQuery, enteredCustomer, quotation, editReceiptNumber, loadingDraft]);
+
   const subtotal = useMemo(() => lines.reduce((sum, l) => sum + l.unitPrice * l.quantity, 0), [lines]);
   const discountNum = Math.min(Number(discount) || 0, subtotal);
   const total = Math.max(0, subtotal - discountNum);
@@ -101,7 +140,7 @@ export default function POSPage() {
   const remaining = Math.max(0, total - paidNum);
   const hasOverStock = lines.some((l) => l.quantity > l.available || l.quantity <= 0);
   const needsAccount = paidNum > 0 && !paymentAccountId;
-  const canComplete = !submitting && !!customer && lines.length > 0 && !hasOverStock && !needsAccount;
+  const canComplete = !submitting && !loadingDraft && (!quotationId || !!quotation) && !!customer && lines.length > 0 && !hasOverStock && !needsAccount;
 
   const handleAddLine = (product) => {
     setLines((prev) => {
@@ -147,9 +186,13 @@ export default function POSPage() {
     setPaidAmount('');
     setPaymentAccountId(null);
     setEditReceiptNumber('');
+    setCustomerQuery('');
+    setEnteredCustomer({ name: '', phone: '' });
+    clearDraft(storageKey);
   };
 
   const handleSubmit = async () => {
+    if (submitLock.current || loadingDraft) return;
     if (!customer) {
       toast.error('Please select or create a customer first.');
       return;
@@ -168,6 +211,7 @@ export default function POSPage() {
       return;
     }
 
+    submitLock.current = true;
     setSubmitting(true);
     try {
       const payload = {
@@ -178,7 +222,11 @@ export default function POSPage() {
         paymentAccountId,
       };
       let saleId;
-      if (editId) {
+      if (quotationId) {
+        const res = await client.post(`/quotations/${quotationId}/convert`, { paidAmount: paidNum, paymentAccountId });
+        saleId = res.data.data.id;
+        toast.success(res.data.existing ? 'This quotation has already been converted.' : 'Quotation converted to a pending invoice. Close Day will confirm it.');
+      } else if (editId) {
         const res = await client.put(`/sales/${editId}`, payload);
         saleId = res.data.data.id;
         toast.success(`Draft invoice ${res.data.data.receiptNumber} updated.`);
@@ -193,6 +241,7 @@ export default function POSPage() {
     } catch (err) {
       toast.error(err.friendlyMessage || 'Could not save this invoice.');
     } finally {
+      submitLock.current = false;
       setSubmitting(false);
     }
   };
@@ -200,7 +249,7 @@ export default function POSPage() {
   return (
     <div className="mx-auto max-w-5xl space-y-6">
       <PageHeader
-        title="Seller / POS"
+        title={quotationId ? 'Convert Quotation to Invoice' : editId ? 'Edit Sales Invoice' : 'Add Sales Invoice'}
         subtitle="Find the customer, add products, and create the pending invoice"
         actions={
           canCloseDay && (
@@ -213,6 +262,9 @@ export default function POSPage() {
         }
       />
 
+      <div className="flex flex-wrap items-center justify-between gap-2"><Link className="text-sm text-indigo-700" to="/pos">? Sales Invoices</Link><Button variant="secondary" disabled={submitting} onClick={() => { if ((customer || lines.length || customerQuery || enteredCustomer.name || paidAmount || Number(discount)) && !window.confirm('Discard this unfinished invoice?')) return; resetSale(); navigate('/pos'); }}>Discard Draft</Button></div>
+      {storageWarning && <p className="text-sm text-amber-700">Browser storage is unavailable. This draft is retained during navigation, but cannot survive a reload.</p>}
+      {quotation && <p className="rounded-lg bg-indigo-50 p-3 text-sm">From {quotation.quotationNumber}. Accepted items, prices and discount are preserved. {quotation.notes}</p>}
       {editId && (
         <div className="flex items-center gap-2 rounded-lg bg-indigo-50 px-4 py-2.5 text-sm font-medium text-indigo-700">
           <Pencil className="h-4 w-4" /> Editing Draft Invoice {editReceiptNumber || editId}
@@ -221,18 +273,18 @@ export default function POSPage() {
       )}
 
       <Card>
-        <CustomerSearchBox activeCustomer={customer} onSelect={setCustomer} onClear={() => setCustomer(null)} cartTotal={total} paidAmount={paidNum} />
+        <fieldset disabled={submitting || !!quotationId}><CustomerSearchBox searchValue={customerQuery} onSearchChange={setCustomerQuery} enteredCustomer={enteredCustomer} onEnteredCustomerChange={setEnteredCustomer} activeCustomer={customer} onSelect={setCustomer} onClear={() => setCustomer(null)} cartTotal={total} paidAmount={paidNum} /></fieldset>
       </Card>
 
       <Card title="Sale Items" subtitle="Add products to this invoice">
-        <SellerItemsGrid
+        <fieldset disabled={submitting || !!quotationId}><SellerItemsGrid
           lines={lines}
           onAddLine={handleAddLine}
           onQuantityChange={handleQuantityChange}
           onRemoveLine={handleRemove}
           disabled={submitting}
           focusTrigger={customer?.id}
-        />
+        /></fieldset>
       </Card>
 
       <Card title="Payment" subtitle="Review totals and record what the customer is paying now">
@@ -250,7 +302,7 @@ export default function POSPage() {
               value={discount}
               onChange={(e) => setDiscount(e.target.value)}
               className="w-28 text-right tabular-nums"
-              disabled={submitting}
+              disabled={submitting || !!quotationId}
             />
           </div>
           <div className="flex justify-between border-t border-slate-100 pt-2.5 text-base font-bold text-slate-900">

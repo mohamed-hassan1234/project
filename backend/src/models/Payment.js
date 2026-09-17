@@ -12,6 +12,11 @@ const allocationSchema = new mongoose.Schema(
 const paymentSchema = new mongoose.Schema(
   {
     receiptNumber: { type: String, required: true, unique: true },
+    paymentAccount: { type: mongoose.Schema.Types.ObjectId, ref: 'Account', default: null },
+    paymentAccountName: { type: String, default: '' },
+    accountTransaction: { type: mongoose.Schema.Types.ObjectId, ref: 'AccountTransaction', default: null },
+    requestKey: { type: String },
+    requestFingerprint: { type: String },
     customer: { type: mongoose.Schema.Types.ObjectId, ref: 'Customer', required: true },
     amountCents: { type: Number, required: true },
     type: { type: String, enum: ['sale', 'debt_payment', 'refund'], default: 'debt_payment' },
@@ -26,6 +31,7 @@ const paymentSchema = new mongoose.Schema(
 );
 
 paymentSchema.index({ customer: 1, createdAt: -1 });
+paymentSchema.index({ createdBy: 1, requestKey: 1 }, { unique: true, partialFilterExpression: { requestKey: { $type: 'string' } } });
 
 
 export default mongoose.model('Payment', paymentSchema);

@@ -9,6 +9,7 @@ import {
   getSale,
   getReceipt,
   reverseSale,
+  returnSale,
 } from '../controllers/saleController.js';
 
 const router = Router();
@@ -22,5 +23,6 @@ router.get('/:id/receipt', getReceipt);
 router.put('/:id', updateSale);
 router.post('/:id/cancel', cancelSale);
 router.post('/:id/reverse', requireRole('admin', 'manager'), reverseSale);
+router.post('/:id/return', requireRole('admin', 'manager'), returnSale);
 
 export default router;

@@ -32,13 +32,38 @@ const saleItemSchema = new mongoose.Schema(
     subtotalCents: { type: Number, required: true, min: 0 },
     batchReservations: { type: [lotConsumptionSchema], default: [] },
     lotConsumption: { type: [lotConsumptionSchema], default: [] },
+    // Cumulative quantity returned via POST /sales/:id/return. Never exceeds
+    // `quantity`; used to cap how much of this line remains returnable.
+    returnedQuantity: { type: Number, default: 0, min: 0 },
   },
   { _id: false }
+);
+
+// One audit record per partial return -- preserved permanently alongside the
+// original invoice rather than rewriting its history in place.
+const saleReturnSchema = new mongoose.Schema(
+  {
+    items: [
+      {
+        item: { type: mongoose.Schema.Types.ObjectId, ref: 'InventoryItem' },
+        itemName: String,
+        quantity: Number,
+        unitPriceCents: Number,
+      },
+    ],
+    amountCents: { type: Number, required: true }, // total value reversed by this return
+    debtReducedCents: { type: Number, required: true, default: 0 }, // portion applied against still-unpaid balance
+    refundCents: { type: Number, required: true, default: 0 }, // portion refunded out of the payment account (already paid)
+    reason: { type: String, default: '' },
+    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+  },
+  { timestamps: true }
 );
 
 const saleSchema = new mongoose.Schema(
   {
     receiptNumber: { type: String, required: true, unique: true },
+    quotation: { type: mongoose.Schema.Types.ObjectId, ref: 'Quotation' },
     customer: { type: mongoose.Schema.Types.ObjectId, ref: 'Customer', required: true },
     customerName: { type: String, required: true },
     items: { type: [saleItemSchema], required: true, validate: (v) => v.length > 0 },
@@ -60,6 +85,7 @@ const saleSchema = new mongoose.Schema(
     confirmedAt: { type: Date, default: null },
     cancelledAt: { type: Date, default: null },
     cancelledReason: { type: String, default: '' },
+    returns: { type: [saleReturnSchema], default: [] },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   },
   { timestamps: true }
@@ -67,6 +93,7 @@ const saleSchema = new mongoose.Schema(
 
 saleSchema.index({ customer: 1, createdAt: -1 });
 saleSchema.index({ createdAt: -1 });
+saleSchema.index({ quotation: 1 }, { unique: true, partialFilterExpression: { quotation: { $type: 'objectId' } } });
 
 saleSchema.index({ customer: 1, outstandingCents: 1 });
 saleSchema.index({ status: 1, createdAt: -1 });

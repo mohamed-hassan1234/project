@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Modal from '../../components/ui/Modal.jsx';
+import AccountSelect from '../../components/AccountSelect.jsx';
 import Button from '../../components/ui/Button.jsx';
 import { FormField, Input } from '../../components/ui/Field.jsx';
 import client from '../../api/client.js';
@@ -18,6 +19,8 @@ export default function PayDebtModal({ open, onClose, customerId, onPaid }) {
   const [allocations, setAllocations] = useState({}); // saleId -> amount string
   const [notes, setNotes] = useState('');
   const [paying, setPaying] = useState(false);
+  const [paymentAccountId, setPaymentAccountId] = useState(null);
+  const [requestKey, setRequestKey] = useState('');
 
   useEffect(() => {
     if (!open) return;
@@ -26,6 +29,8 @@ export default function PayDebtModal({ open, onClose, customerId, onPaid }) {
     setAmount('');
     setAllocations({});
     setNotes('');
+    setPaymentAccountId(null);
+    setRequestKey(crypto.randomUUID());
     client
       .get(`/customers/${customerId}/debt`)
       .then((res) => {
@@ -50,6 +55,8 @@ export default function PayDebtModal({ open, onClose, customerId, onPaid }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (paying) return;
+    if (!paymentAccountId) return toast.error('Please select an account for this payment.');
     setPaying(true);
     try {
       let payload;
@@ -72,7 +79,7 @@ export default function PayDebtModal({ open, onClose, customerId, onPaid }) {
         payload = { amount: Number(amount), notes };
       }
 
-      const res = await client.post(`/customers/${customerId}/payments`, payload);
+      const res = await client.post(`/customers/${customerId}/payments`, { ...payload, paymentAccountId, requestKey });
       toast.success(`Payment recorded (${res.data.data.receiptNumber}).`);
       onPaid();
       onClose();
@@ -163,12 +170,15 @@ export default function PayDebtModal({ open, onClose, customerId, onPaid }) {
           <FormField label="Notes">
             <Input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Optional" />
           </FormField>
+          <FormField label="Receive Into Account" required>
+            <AccountSelect value={paymentAccountId} onChange={setPaymentAccountId} disabled={paying} placeholder="Select account..." />
+          </FormField>
 
           <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
             <Button type="button" variant="secondary" onClick={onClose} disabled={paying}>
               Cancel
             </Button>
-            <Button type="submit" loading={paying}>
+            <Button type="submit" loading={paying} disabled={!paymentAccountId || paying}>
               Record Payment
             </Button>
           </div>

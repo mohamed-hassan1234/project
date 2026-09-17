@@ -1,15 +1,18 @@
 import { useEffect, useState, useCallback } from 'react';
-import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Wallet, Receipt, History, FileText } from 'lucide-react';
+import { useParams, Link, useNavigate } from 'react-router-dom';
+import { ArrowLeft, Wallet, Receipt, History, FileText, Pencil, XCircle, Undo2 } from 'lucide-react';
 import client from '../../api/client.js';
+import { useAuth } from '../../context/AuthContext.jsx';
 import { useToast } from '../../context/ToastContext.jsx';
 import { formatCurrency, formatDate, formatDateTime } from '../../utils/format.js';
 import { PageSpinner } from '../../components/ui/Spinner.jsx';
 import Card from '../../components/ui/Card.jsx';
 import Button from '../../components/ui/Button.jsx';
 import Badge from '../../components/ui/Badge.jsx';
+import ConfirmDialog from '../../components/ui/ConfirmDialog.jsx';
 import { FormField, Input } from '../../components/ui/Field.jsx';
 import PayDebtModal from './PayDebtModal.jsx';
+import ReturnItemsModal from './ReturnItemsModal.jsx';
 
 const LEDGER_LABELS = {
   SALE_CREDIT: { label: 'Debt Created', color: 'red' },
@@ -21,13 +24,19 @@ const LEDGER_LABELS = {
 
 export default function CustomerDetailPage() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const toast = useToast();
+  const { user } = useAuth();
+  const canManage = user?.role === 'admin' || user?.role === 'manager';
   const [data, setData] = useState(null);
   const [debt, setDebt] = useState(null);
   const [loading, setLoading] = useState(true);
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [payOpen, setPayOpen] = useState(false);
+  const [returnSale, setReturnSale] = useState(null);
+  const [cancelTarget, setCancelTarget] = useState(null); // { sale, mode: 'cancel' | 'reverse' }
+  const [cancelling, setCancelling] = useState(false);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -44,6 +53,22 @@ export default function CustomerDetailPage() {
   }, [id, from, to]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => load(), [load]);
+
+  const handleCancelConfirm = async () => {
+    if (!cancelTarget) return;
+    setCancelling(true);
+    try {
+      const path = cancelTarget.mode === 'reverse' ? `/sales/${cancelTarget.sale.id}/reverse` : `/sales/${cancelTarget.sale.id}/cancel`;
+      await client.post(path, { reason: cancelTarget.mode === 'reverse' ? 'Cancelled by customer' : 'Cancelled by seller' });
+      toast.success(cancelTarget.mode === 'reverse' ? 'Invoice cancelled and reversed.' : 'Draft invoice cancelled.');
+      setCancelTarget(null);
+      load();
+    } catch (err) {
+      toast.error(err.friendlyMessage || 'Could not cancel this invoice.');
+    } finally {
+      setCancelling(false);
+    }
+  };
 
   if (loading && !data) return <PageSpinner />;
   if (!data) return null;
@@ -146,12 +171,45 @@ export default function CustomerDetailPage() {
                       <span className="font-semibold text-slate-800">{s.receiptNumber}</span>
                       {s.status === 'CANCELLED' && <Badge color="red">Cancelled</Badge>}
                       {s.status === 'DRAFT' && <Badge color="amber">Pending</Badge>}
+                      {s.returnCount > 0 && <Badge color="blue">{s.returnCount} return{s.returnCount > 1 ? 's' : ''}</Badge>}
                     </div>
                     <div className="flex items-center gap-3">
                       <span className="text-xs text-slate-400">{formatDateTime(s.createdAt)}</span>
                       <Link to={`/receipt/${s.id}`} className="text-xs font-semibold text-indigo-600 hover:underline no-print">
                         View / Print
                       </Link>
+                      {s.status === 'DRAFT' && (
+                        <>
+                          <button
+                            className="flex items-center gap-1 text-xs font-semibold text-slate-500 hover:text-indigo-600 no-print"
+                            onClick={() => navigate(`/pos?edit=${s.id}`)}
+                          >
+                            <Pencil className="h-3.5 w-3.5" /> Edit
+                          </button>
+                          <button
+                            className="flex items-center gap-1 text-xs font-semibold text-rose-500 hover:text-rose-700 no-print"
+                            onClick={() => setCancelTarget({ sale: s, mode: 'cancel' })}
+                          >
+                            <XCircle className="h-3.5 w-3.5" /> Cancel
+                          </button>
+                        </>
+                      )}
+                      {s.status === 'CONFIRMED' && canManage && (
+                        <>
+                          <button
+                            className="flex items-center gap-1 text-xs font-semibold text-slate-500 hover:text-indigo-600 no-print"
+                            onClick={() => setReturnSale(s)}
+                          >
+                            <Undo2 className="h-3.5 w-3.5" /> Return Items
+                          </button>
+                          <button
+                            className="flex items-center gap-1 text-xs font-semibold text-rose-500 hover:text-rose-700 no-print"
+                            onClick={() => setCancelTarget({ sale: s, mode: 'reverse' })}
+                          >
+                            <XCircle className="h-3.5 w-3.5" /> Cancel Invoice
+                          </button>
+                        </>
+                      )}
                     </div>
                   </div>
                   <ul className="mb-2 space-y-0.5 text-sm text-slate-600">
@@ -159,6 +217,7 @@ export default function CustomerDetailPage() {
                       <li key={i} className="flex justify-between">
                         <span>
                           {it.name} × {it.quantity}
+                          {it.returnedQuantity > 0 && <span className="ml-1 text-xs text-blue-600">({it.returnedQuantity} returned)</span>}
                         </span>
                         <span>{formatCurrency(it.subtotal)}</span>
                       </li>
@@ -210,6 +269,21 @@ export default function CustomerDetailPage() {
       </div>
 
       <PayDebtModal open={payOpen} onClose={() => setPayOpen(false)} customerId={id} onPaid={load} />
+      <ReturnItemsModal open={!!returnSale} onClose={() => setReturnSale(null)} sale={returnSale} onReturned={load} />
+      <ConfirmDialog
+        open={!!cancelTarget}
+        title={cancelTarget?.mode === 'reverse' ? 'Cancel Invoice' : 'Cancel Draft Invoice'}
+        message={
+          cancelTarget?.mode === 'reverse'
+            ? `Cancel confirmed invoice ${cancelTarget?.sale.receiptNumber}? Stock will be restored, the customer's balance and any paid amount will be reversed, and the invoice will be marked Cancelled (never deleted).`
+            : `Cancel draft invoice ${cancelTarget?.sale.receiptNumber}? Reserved stock and any pending payment will be released.`
+        }
+        confirmLabel={cancelTarget?.mode === 'reverse' ? 'Cancel Invoice' : 'Cancel Draft'}
+        variant="danger"
+        loading={cancelling}
+        onConfirm={handleCancelConfirm}
+        onClose={() => setCancelTarget(null)}
+      />
     </div>
   );
 }

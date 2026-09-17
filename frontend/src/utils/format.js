@@ -4,7 +4,8 @@ export function formatMoney(value) {
 }
 
 export function formatCurrency(value) {
-  return `$${formatMoney(value)}`;
+  const n = Number(value) || 0;
+  return n < 0 ? `-$${formatMoney(-n)}` : `$${formatMoney(n)}`;
 }
 
 export function formatDate(date) {

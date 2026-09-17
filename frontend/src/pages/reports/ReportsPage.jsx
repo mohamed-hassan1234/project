@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
+import QuotationsPage from '../quotations/QuotationsPage.jsx';
 import { Link } from 'react-router-dom';
 import {
   ResponsiveContainer,
@@ -34,6 +35,7 @@ import PrintReportFooter from '../../components/reports/PrintReportFooter.jsx';
 import ProfitDrilldownModal from './ProfitDrilldownModal.jsx';
 
 const TABS = [
+  { key: 'quotations', label: 'Quotation', title: 'Quotation Report', orientation: 'landscape' },
   { key: 'sales', label: 'Sales', title: 'Sales Report', orientation: 'portrait' },
   { key: 'profit', label: 'Profit', title: 'Profit Report', orientation: 'portrait' },
   { key: 'inventory', label: 'Inventory', title: 'Inventory Report', orientation: 'landscape' },
@@ -53,6 +55,7 @@ export default function ReportsPage() {
   const activeTab = TABS.find((t) => t.key === tab);
 
   const load = useCallback(() => {
+    if (tab === 'quotations') return;
     setLoading(true);
     const params = tab === 'inventory' ? {} : rangeParams;
     client
@@ -69,6 +72,8 @@ export default function ReportsPage() {
   const ready = data && data.__tab === tab && !loading;
   const showDateFilters = tab !== 'inventory';
   const rangeLabel = tab === 'inventory' ? 'As of today' : formatRangeLabel(data?.range);
+
+  if (tab === 'quotations') return <div className="space-y-4"><Button variant="secondary" onClick={() => setTab('sales')}>← Other Reports</Button><QuotationsPage report /></div>;
 
   return (
     <div>

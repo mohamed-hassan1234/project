@@ -12,7 +12,7 @@ const accountTransactionSchema = new mongoose.Schema(
     direction: { type: String, enum: ['IN', 'OUT'], required: true },
     type: {
       type: String,
-      enum: ['SALE_PAYMENT', 'PURCHASE_PAYMENT', 'REFUND', 'DEPOSIT', 'WITHDRAWAL', 'ADJUSTMENT'],
+      enum: ['SALE_PAYMENT', 'CUSTOMER_DEBT_PAYMENT', 'PURCHASE_PAYMENT', 'REFUND', 'DEPOSIT', 'WITHDRAWAL', 'ADJUSTMENT'],
       required: true,
     },
     amountCents: { type: Number, required: true, min: 0 },

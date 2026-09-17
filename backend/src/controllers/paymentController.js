@@ -38,7 +38,7 @@ export const listPayments = asyncHandler(async (req, res) => {
 
 // GET /api/payments/:id/receipt -- printable A5 debt payment receipt
 export const getPaymentReceipt = asyncHandler(async (req, res) => {
-  const payment = await Payment.findById(req.params.id).populate('customer', 'name phone');
+  const payment = await Payment.findById(req.params.id).populate('customer', 'name phone').populate('paymentAccount', 'name');
   if (!payment) throw new ApiError(404, 'Payment not found.');
 
   res.json({
@@ -48,6 +48,8 @@ export const getPaymentReceipt = asyncHandler(async (req, res) => {
       receiptNumber: payment.receiptNumber,
       customerName: payment.customer?.name || '',
       customerPhone: payment.customer?.phone || '',
+      paymentAccount: payment.paymentAccount?._id || null,
+      paymentAccountName: payment.paymentAccountName || payment.paymentAccount?.name || '',
       amount: fromCents(payment.amountCents),
       previousBalance: fromCents(payment.previousBalanceCents),
       newBalance: fromCents(payment.newBalanceCents),

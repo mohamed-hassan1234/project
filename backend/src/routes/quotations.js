@@ -1,0 +1,13 @@
+import { Router } from 'express';
+import { requireAuth, requireRole } from '../middleware/auth.js';
+import { listQuotations, getQuotation, createQuotation, updateQuotation, setQuotationStatus, deleteQuotation, convertQuotation } from '../controllers/quotationController.js';
+const router = Router();
+router.use(requireAuth);
+router.get('/', listQuotations);
+router.post('/', createQuotation);
+router.get('/:id', getQuotation);
+router.put('/:id', updateQuotation);
+router.patch('/:id/status', setQuotationStatus);
+router.post('/:id/convert', convertQuotation);
+router.delete('/:id', requireRole('admin', 'manager'), deleteQuotation);
+export default router;

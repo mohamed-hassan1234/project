@@ -1,5 +1,8 @@
 import StockPage from './pages/stock/StockPage.jsx';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import SalesInvoicePage from './pages/pos/SalesInvoicePage.jsx';
+import QuotationsPage from './pages/quotations/QuotationsPage.jsx';
+import QuotationDetailPage from './pages/quotations/QuotationDetailPage.jsx';
 import { AuthProvider } from './context/AuthContext.jsx';
 import { ToastProvider } from './context/ToastContext.jsx';
 import ProtectedRoute from './components/ProtectedRoute.jsx';
@@ -25,6 +28,8 @@ import PaymentReceiptPage from './pages/receipt/PaymentReceiptPage.jsx';
 import PurchaseReceiptPage from './pages/receipt/PurchaseReceiptPage.jsx';
 import NotFound from './pages/NotFound.jsx';
 
+function POSWorkspace() { const location = useLocation(); return <POSPage key={location.search} />; }
+
 export default function App() {
   return (
     <ToastProvider>
@@ -44,7 +49,11 @@ export default function App() {
               <Route path="/inventory" element={<InventoryPage />} />
               <Route path="/inventory/:id/print" element={<InventoryPrintPage />} />
               <Route path="/categories" element={<CategoriesPage />} />
-              <Route path="/pos" element={<POSPage />} />
+              <Route path="/pos" element={<SalesInvoicePage />} />
+              <Route path="/pos/new" element={<POSWorkspace />} />
+              <Route path="/quotations" element={<QuotationsPage />} />
+              <Route path="/quotations/new" element={<QuotationDetailPage key="new" />} />
+              <Route path="/quotations/:id" element={<QuotationDetailPage />} />
               <Route path="/pos/close-day" element={<CloseDayPage />} />
               <Route path="/stock" element={<StockPage />} />
               <Route path="/purchases" element={<PurchasesPage />} />

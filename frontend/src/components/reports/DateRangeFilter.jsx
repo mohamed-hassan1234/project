@@ -1,9 +1,10 @@
 import { Select, Input } from '../ui/Field.jsx';
 
-export default function DateRangeFilter({ range, onRangeChange, from, to, onFromChange, onToChange }) {
+export default function DateRangeFilter({ range, onRangeChange, from, to, onFromChange, onToChange, allowAll = false }) {
   return (
     <div className="mb-5 flex flex-wrap items-end gap-3 no-print">
       <Select value={range} onChange={(e) => onRangeChange(e.target.value)}>
+        {allowAll && <option value="all">All History</option>}
         <option value="today">Today</option>
         <option value="yesterday">Yesterday</option>
         <option value="week">This Week</option>

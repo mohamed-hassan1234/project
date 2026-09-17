@@ -40,8 +40,12 @@ test('purchase, stock, reservations, close-day, expiry, rollback and concurrency
     assert.equal(await InventoryItem.countDocuments(), 0);
     assert.equal((await Account.findById(account.id)).currentBalanceCents, 70000);
     assert.equal((await AccountTransaction.findOne()).balanceBeforeCents, 100000);
-    assert.equal((await request('/purchases', { supplierId: supplier.id, amount: 800, purchaseAccountId: account.id })).status, 409);
-    assert.equal(await Purchase.countDocuments(), 1);
+    // Purchases are never rejected for insufficient balance: the account is
+    // simply allowed to go negative, and never silently split across accounts.
+    const overdrawn = await request('/purchases', { supplierId: supplier.id, amount: 800, purchaseAccountId: account.id });
+    assert.equal(overdrawn.status, 201, JSON.stringify(overdrawn));
+    assert.equal(await Purchase.countDocuments(), 2);
+    assert.equal((await Account.findById(account.id)).currentBalanceCents, -10000);
     assert.equal((await Account.findById(other.id)).currentBalanceCents, 100000);
     const first = await request('/stock', { rows: [row('Amoxicillin', 20), row('Ibuprofen', 50)] });
     assert.equal(first.status, 201, JSON.stringify(first));
@@ -105,9 +109,11 @@ test('purchase, stock, reservations, close-day, expiry, rollback and concurrency
     assert.ok(concurrent.every(r => r.status === 201), JSON.stringify(concurrent));
     assert.equal(await InventoryItem.countDocuments({ name: 'Concurrent new' }), 1);
     assert.equal((await InventoryItem.findOne({ name: 'Concurrent new' })).quantity, 10);
+    // Concurrent purchases against the same (already-negative) account both
+    // succeed -- overdraft is allowed -- and neither debit is lost to a race.
     const payments = await Promise.all([request('/purchases', { supplierId: supplier.id, amount: 500, purchaseAccountId: account.id }), request('/purchases', { supplierId: supplier.id, amount: 500, purchaseAccountId: account.id })]);
-    assert.deepEqual(payments.map(p => p.status).sort(), [201, 409]);
-    assert.equal((await Account.findById(account.id)).currentBalanceCents, 20000);
+    assert.deepEqual(payments.map(p => p.status).sort(), [201, 201]);
+    assert.equal((await Account.findById(account.id)).currentBalanceCents, -110000);
   } finally {
     await new Promise(resolve => server.close(resolve));
     await mongoose.disconnect();

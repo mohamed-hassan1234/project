@@ -1,14 +1,11 @@
 import { useEffect, useState, useCallback } from 'react';
-import { ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
-import { Plus, Search, Pencil, Trash2, Eye, Boxes, Layers, Wallet, TrendingUp, AlertTriangle, PackageX, CalendarClock } from 'lucide-react';
+import { Plus, Search, Pencil, Trash2, Eye } from 'lucide-react';
 import client from '../../api/client.js';
 import { useDebounce } from '../../hooks/useDebounce.js';
 import { useToast } from '../../context/ToastContext.jsx';
 import { formatCurrency, formatDate } from '../../utils/format.js';
 import PageHeader from '../../components/ui/PageHeader.jsx';
 import Button from '../../components/ui/Button.jsx';
-import Card from '../../components/ui/Card.jsx';
-import StatCard from '../../components/ui/StatCard.jsx';
 import { Input, Select } from '../../components/ui/Field.jsx';
 import { Table, THead, Th, TBody, Td, TableEmpty, TableLoading } from '../../components/ui/Table.jsx';
 import Pagination from '../../components/ui/Pagination.jsx';
@@ -16,72 +13,6 @@ import Badge, { stockStatusBadge, expiryStatusBadge } from '../../components/ui/
 import ConfirmDialog from '../../components/ui/ConfirmDialog.jsx';
 import InventoryFormModal from './InventoryFormModal.jsx';
 import InventoryDetailsModal from './InventoryDetailsModal.jsx';
-
-function InventoryAnalytics() {
-  const [stats, setStats] = useState(null);
-
-  useEffect(() => {
-    client.get('/reports/inventory').then((res) => setStats(res.data.data)).catch(() => {});
-  }, []);
-
-  if (!stats) return null;
-
-  const distribution = [
-    { name: 'Healthy', value: stats.stockDistribution.healthy },
-    { name: 'Low Stock', value: stats.stockDistribution.lowStock },
-    { name: 'Out of Stock', value: stats.stockDistribution.outOfStock },
-  ].filter((d) => d.value > 0);
-
-  return (
-    <div className="mb-6 space-y-4">
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-        <StatCard label="Total Products" value={stats.totalItems} icon={Boxes} tone="slate" />
-        <StatCard label="Units in Stock" value={stats.totalQuantity} icon={Layers} tone="slate" />
-        <StatCard label="Cost Value" value={formatCurrency(stats.stockValueAtCost)} icon={Wallet} tone="indigo" />
-        <StatCard label="Retail Value" value={formatCurrency(stats.stockValueAtSelling)} icon={Wallet} tone="indigo" />
-        <StatCard label="Potential Margin" value={formatCurrency(stats.potentialGrossProfit)} icon={TrendingUp} tone="emerald" />
-        <StatCard label="Low Stock" value={stats.lowStock.length} icon={AlertTriangle} tone="amber" />
-        <StatCard label="Out of Stock" value={stats.outOfStock.length} icon={PackageX} tone="rose" />
-        <StatCard label="Expiring / Expired" value={`${stats.nearExpiry.length} / ${stats.expired.length}`} icon={CalendarClock} tone="rose" />
-      </div>
-
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <Card title="Inventory Value by Category" className="lg:col-span-2">
-          {stats.valueByCategory.length === 0 ? (
-            <p className="py-10 text-center text-sm text-slate-400">No data yet.</p>
-          ) : (
-            <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={stats.valueByCategory}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                <XAxis dataKey="category" tick={{ fontSize: 11 }} interval={0} angle={-10} textAnchor="end" height={45} />
-                <YAxis tick={{ fontSize: 11 }} />
-                <Tooltip formatter={(v) => formatCurrency(v)} />
-                <Bar dataKey="costValue" fill="#4f46e5" radius={[4, 4, 0, 0]} name="Cost Value" />
-              </BarChart>
-            </ResponsiveContainer>
-          )}
-        </Card>
-
-        <Card title="Stock Health">
-          {distribution.length === 0 ? (
-            <p className="py-10 text-center text-sm text-slate-400">No data yet.</p>
-          ) : (
-            <ResponsiveContainer width="100%" height={220}>
-              <PieChart>
-                <Pie data={distribution} dataKey="value" nameKey="name" outerRadius={75} label={(e) => e.value}>
-                  {distribution.map((d) => (
-                    <Cell key={d.name} fill={d.name === 'Healthy' ? '#10b981' : d.name === 'Low Stock' ? '#f59e0b' : '#ef4444'} />
-                  ))}
-                </Pie>
-                <Tooltip />
-              </PieChart>
-            </ResponsiveContainer>
-          )}
-        </Card>
-      </div>
-    </div>
-  );
-}
 
 export default function InventoryPage() {
   const toast = useToast();
@@ -170,8 +101,6 @@ export default function InventoryPage() {
           </Button>
         }
       />
-
-      <InventoryAnalytics />
 
       <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-6">
         <div className="relative lg:col-span-2">

@@ -104,15 +104,15 @@ export default function ReceiptPage() {
 
         <div className="flex items-center justify-between">
           <p className="text-sm font-bold uppercase tracking-wide text-slate-800">Sales Invoice</p>
-          <Badge color={statusBadge.color}>STATUS: {statusBadge.label}</Badge>
+          <span className="no-print"><Badge color={statusBadge.color}>STATUS: {statusBadge.label}</Badge></span>
         </div>
         {sale.status === 'DRAFT' && (
-          <p className="mt-1 text-center text-[11px] font-medium text-amber-600">
+          <p className="mt-1 text-center text-[11px] font-medium text-amber-600 no-print">
             This invoice is PENDING and will only become final when the business day is closed.
           </p>
         )}
         {sale.status === 'CANCELLED' && sale.cancelledReason && (
-          <p className="mt-1 text-center text-[11px] font-medium text-rose-600">Reason: {sale.cancelledReason}</p>
+          <p className="mt-1 text-center text-[11px] font-medium text-rose-600 no-print">Reason: {sale.cancelledReason}</p>
         )}
 
         <div className="my-3 border-t border-dashed border-slate-300" />
