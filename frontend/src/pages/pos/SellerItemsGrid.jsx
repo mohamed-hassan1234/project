@@ -50,7 +50,10 @@ function ItemSearchCell({ onSelect, placeholder, inputRef }) {
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       setHighlighted((h) => Math.max(h - 1, 0));
-    } else if (e.key === 'Enter') {
+    } else if (e.key === 'Enter' || (e.key === 'Tab' && !e.shiftKey)) {
+      // Tab behaves like Enter here so the seller can move through the grid
+      // by keyboard alone -- it commits the highlighted match instead of
+      // tabbing past the row with nothing selected.
       e.preventDefault();
       choose(results[highlighted]);
     } else if (e.key === 'Escape') {

@@ -6,6 +6,7 @@ import { useAuth } from '../../context/AuthContext.jsx';
 import { useToast } from '../../context/ToastContext.jsx';
 import { formatCurrency, formatDate, formatDateTime } from '../../utils/format.js';
 import { printReport } from '../../utils/printReport.js';
+import { BUSINESS } from '../../constants/business.js';
 import { PageSpinner } from '../../components/ui/Spinner.jsx';
 import Card from '../../components/ui/Card.jsx';
 import Button from '../../components/ui/Button.jsx';
@@ -14,6 +15,7 @@ import ConfirmDialog from '../../components/ui/ConfirmDialog.jsx';
 import { FormField, Input, Select } from '../../components/ui/Field.jsx';
 import PayDebtModal from './PayDebtModal.jsx';
 import ReturnItemsModal from './ReturnItemsModal.jsx';
+import logo from '../../images/logo.png';
 
 const LEDGER_LABELS = {
   SALE_CREDIT: { label: 'Debt Created', color: 'red' },
@@ -24,6 +26,14 @@ const LEDGER_LABELS = {
 };
 
 const INVOICE_STATUS_LABEL = { DRAFT: 'Draft', CONFIRMED: 'Completed', CANCELLED: 'Cancelled' };
+
+// DRAFT invoices are deliberately never posted to outstandingCents (see
+// customerController.getCustomerStatement) -- so a $0-paid Draft would
+// otherwise read as "Fully Paid". CONFIRMED/CANCELLED already carry the
+// correct, ledger-authoritative outstanding value.
+function invoiceBalance(sale) {
+  return sale.status === 'DRAFT' ? Math.max(0, sale.total - sale.paidAmount) : sale.outstanding;
+}
 
 export default function CustomerDetailPage() {
   const { id } = useParams();
@@ -176,101 +186,154 @@ export default function CustomerDetailPage() {
         </div>
 
         <Card className="mb-6" title={`Invoices (${sales.length})`}>
+          {/* Print-only branded statement header -- screen navigation, filter
+              controls and per-invoice action buttons never appear here. */}
           <div className="mb-4 hidden print:block">
-            <p className="text-sm font-bold text-slate-900">Customer: {customer.name}</p>
-            <p className="text-xs text-slate-500">Invoice Status: {status ? INVOICE_STATUS_LABEL[status] : 'All'}</p>
-            <p className="text-xs text-slate-500">Date Range: {from || to ? `${from || 'Start'} – ${to || 'Today'}` : 'All History'}</p>
+            <div className="flex flex-col items-center text-center">
+              <img src={logo} alt={BUSINESS.name} className="h-14 w-auto object-contain" />
+              <h1 className="mt-1 text-base font-bold tracking-wide text-slate-900">{BUSINESS.name}</h1>
+              <p className="text-xs text-slate-500">{BUSINESS.addressLine}</p>
+              <p className="text-xs text-slate-500">{BUSINESS.phone}</p>
+            </div>
+            <div className="my-3 border-t border-dashed border-slate-300" />
+            <p className="text-center text-base font-bold uppercase tracking-wide text-slate-900">Customer Invoice Statement</p>
+            <div className="my-3 border-t border-dashed border-slate-300" />
+            <div className="flex flex-wrap items-start justify-between gap-4 text-xs">
+              <div>
+                <p className="text-slate-400">Customer</p>
+                <p className="font-semibold text-slate-800">{customer.name}</p>
+                {customer.phone && <p className="text-slate-500">{customer.phone}</p>}
+              </div>
+              <div className="text-right">
+                <p className="text-slate-400">Date Range</p>
+                <p className="font-semibold text-slate-800">{from || to ? `${from || 'Start'} – ${to || 'Today'}` : 'All History'}</p>
+                <p className="mt-1 text-slate-400">Invoice Filter</p>
+                <p className="font-semibold text-slate-800">{status ? INVOICE_STATUS_LABEL[status] : 'All'}</p>
+              </div>
+            </div>
+            <div className="my-3 border-t border-dashed border-slate-300" />
           </div>
+
           {sales.length === 0 ? (
-            <p className="py-8 text-center text-sm text-slate-400">No invoices match the current filter.</p>
+            <p className="py-8 text-center text-sm text-slate-400">No invoices found for the selected filters.</p>
           ) : (
-            <div className="space-y-3">
-              {sales.map((s) => (
-                <div key={s.id} className="rounded-lg border border-slate-100 p-4">
-                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <Receipt className="h-4 w-4 text-slate-400" />
-                      <span className="font-semibold text-slate-800">{s.receiptNumber}</span>
-                      {s.status === 'CANCELLED' && <Badge color="red">Cancelled</Badge>}
-                      {s.status === 'DRAFT' && <Badge color="amber">Pending</Badge>}
-                      {s.returnCount > 0 && <Badge color="blue">{s.returnCount} return{s.returnCount > 1 ? 's' : ''}</Badge>}
+            <div className="space-y-2.5">
+              {sales.map((s) => {
+                const balance = invoiceBalance(s);
+                return (
+                  <div key={s.id} className="rounded-lg border border-slate-100 p-3" style={{ pageBreakInside: 'avoid' }}>
+                    <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <Receipt className="h-3.5 w-3.5 text-slate-400 no-print" />
+                        <span className="text-sm font-semibold text-slate-800">{s.receiptNumber}</span>
+                        {s.status === 'CANCELLED' && <Badge color="red">Cancelled</Badge>}
+                        {s.status === 'DRAFT' && <Badge color="amber">Pending</Badge>}
+                        {s.returnCount > 0 && <Badge color="blue">{s.returnCount} return{s.returnCount > 1 ? 's' : ''}</Badge>}
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className="text-xs text-slate-400">{formatDateTime(s.createdAt)}</span>
+                        <Link to={`/receipt/${s.id}`} className="text-xs font-semibold text-indigo-600 hover:underline no-print">
+                          View / Print
+                        </Link>
+                        {s.status === 'DRAFT' && (
+                          <>
+                            <button
+                              className="flex items-center gap-1 text-xs font-semibold text-slate-500 hover:text-indigo-600 no-print"
+                              onClick={() => navigate(`/pos?edit=${s.id}`)}
+                            >
+                              <Pencil className="h-3.5 w-3.5" /> Edit
+                            </button>
+                            <button
+                              className="flex items-center gap-1 text-xs font-semibold text-rose-500 hover:text-rose-700 no-print"
+                              onClick={() => setCancelTarget({ sale: s, mode: 'cancel' })}
+                            >
+                              <XCircle className="h-3.5 w-3.5" /> Cancel
+                            </button>
+                          </>
+                        )}
+                        {s.status === 'CONFIRMED' && canManage && (
+                          <>
+                            <button
+                              className="flex items-center gap-1 text-xs font-semibold text-slate-500 hover:text-indigo-600 no-print"
+                              onClick={() => setReturnSale(s)}
+                            >
+                              <Undo2 className="h-3.5 w-3.5" /> Return Items
+                            </button>
+                            <button
+                              className="flex items-center gap-1 text-xs font-semibold text-rose-500 hover:text-rose-700 no-print"
+                              onClick={() => setCancelTarget({ sale: s, mode: 'reverse' })}
+                            >
+                              <XCircle className="h-3.5 w-3.5" /> Cancel Invoice
+                            </button>
+                          </>
+                        )}
+                      </div>
                     </div>
-                    <div className="flex items-center gap-3">
-                      <span className="text-xs text-slate-400">{formatDateTime(s.createdAt)}</span>
-                      <Link to={`/receipt/${s.id}`} className="text-xs font-semibold text-indigo-600 hover:underline no-print">
-                        View / Print
-                      </Link>
-                      {s.status === 'DRAFT' && (
-                        <>
-                          <button
-                            className="flex items-center gap-1 text-xs font-semibold text-slate-500 hover:text-indigo-600 no-print"
-                            onClick={() => navigate(`/pos?edit=${s.id}`)}
-                          >
-                            <Pencil className="h-3.5 w-3.5" /> Edit
-                          </button>
-                          <button
-                            className="flex items-center gap-1 text-xs font-semibold text-rose-500 hover:text-rose-700 no-print"
-                            onClick={() => setCancelTarget({ sale: s, mode: 'cancel' })}
-                          >
-                            <XCircle className="h-3.5 w-3.5" /> Cancel
-                          </button>
-                        </>
-                      )}
-                      {s.status === 'CONFIRMED' && canManage && (
-                        <>
-                          <button
-                            className="flex items-center gap-1 text-xs font-semibold text-slate-500 hover:text-indigo-600 no-print"
-                            onClick={() => setReturnSale(s)}
-                          >
-                            <Undo2 className="h-3.5 w-3.5" /> Return Items
-                          </button>
-                          <button
-                            className="flex items-center gap-1 text-xs font-semibold text-rose-500 hover:text-rose-700 no-print"
-                            onClick={() => setCancelTarget({ sale: s, mode: 'reverse' })}
-                          >
-                            <XCircle className="h-3.5 w-3.5" /> Cancel Invoice
-                          </button>
-                        </>
-                      )}
+
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="border-b border-slate-100 text-left uppercase text-slate-400">
+                          <th className="w-6 py-1 font-medium">No</th>
+                          <th className="py-1 font-medium">Description</th>
+                          <th className="py-1 text-center font-medium">Qty</th>
+                          <th className="py-1 text-right font-medium">Price</th>
+                          <th className="py-1 text-right font-medium">Total</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {s.items.map((it, i) => (
+                          <tr key={i} className="border-b border-slate-50">
+                            <td className="py-1 text-slate-400">{i + 1}</td>
+                            <td className="py-1 text-slate-700">
+                              {it.name}
+                              {it.returnedQuantity > 0 && <span className="ml-1 text-[10px] text-blue-600">({it.returnedQuantity} returned)</span>}
+                            </td>
+                            <td className="py-1 text-center text-slate-600">{it.quantity}</td>
+                            <td className="py-1 text-right text-slate-500">{formatCurrency(it.unitPrice)}</td>
+                            <td className="py-1 text-right font-medium text-slate-800">{formatCurrency(it.subtotal)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+
+                    <div className="mt-1.5 flex flex-wrap justify-end gap-4 border-t border-slate-100 pt-1.5 text-xs text-slate-500">
+                      <span>
+                        Invoice Total: <strong className="text-slate-800">{formatCurrency(s.total)}</strong>
+                      </span>
+                      <span>
+                        Paid: <strong className="text-slate-800">{formatCurrency(s.paidAmount)}</strong>
+                      </span>
+                      <span className={balance > 0 ? 'font-semibold text-rose-600' : 'text-emerald-600'}>
+                        {balance > 0 ? `Balance: ${formatCurrency(balance)}` : 'Fully Paid'}
+                      </span>
                     </div>
                   </div>
-                  <ul className="mb-2 space-y-0.5 text-sm text-slate-600">
-                    {s.items.map((it, i) => (
-                      <li key={i} className="flex justify-between">
-                        <span>
-                          {it.name} × {it.quantity}
-                          {it.returnedQuantity > 0 && <span className="ml-1 text-xs text-blue-600">({it.returnedQuantity} returned)</span>}
-                        </span>
-                        <span>{formatCurrency(it.subtotal)}</span>
-                      </li>
-                    ))}
-                  </ul>
-                  <div className="flex flex-wrap gap-4 border-t border-slate-100 pt-2 text-xs text-slate-500">
-                    <span>
-                      Total: <strong className="text-slate-800">{formatCurrency(s.total)}</strong>
-                    </span>
-                    <span>
-                      Paid: <strong className="text-slate-800">{formatCurrency(s.paidAmount)}</strong>
-                    </span>
-                    <span className={s.outstanding > 0 ? 'font-semibold text-rose-600' : 'text-emerald-600'}>
-                      {s.outstanding > 0 ? `Remaining: ${formatCurrency(s.outstanding)}` : 'Fully Paid'}
-                    </span>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
+
           {sales.length > 0 && (
-            <div className="mt-4 hidden justify-end gap-4 border-t border-slate-200 pt-3 text-sm print:flex">
-              <span>
-                Total Amount: <strong className="text-slate-800">{formatCurrency(sales.reduce((sum, s) => sum + s.total, 0))}</strong>
-              </span>
-              <span>
-                Total Paid: <strong className="text-slate-800">{formatCurrency(sales.reduce((sum, s) => sum + s.paidAmount, 0))}</strong>
-              </span>
-              <span className="font-semibold text-rose-600">
-                Outstanding: {formatCurrency(sales.reduce((sum, s) => sum + s.outstanding, 0))}
-              </span>
+            <div className="mt-5 border-t border-slate-200 pt-4 print:mt-8 print:border-t-2 print:border-dashed">
+              <p className="mb-2 hidden text-center text-sm font-bold uppercase tracking-wide text-slate-700 print:block">Statement Summary</p>
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <div className="rounded-lg bg-slate-50 px-3 py-2 text-center">
+                  <p className="text-[10px] uppercase tracking-wide text-slate-400">Number of Invoices</p>
+                  <p className="text-base font-bold text-slate-800">{sales.length}</p>
+                </div>
+                <div className="rounded-lg bg-slate-50 px-3 py-2 text-center">
+                  <p className="text-[10px] uppercase tracking-wide text-slate-400">Total Invoice Amount</p>
+                  <p className="text-base font-bold text-slate-800">{formatCurrency(sales.reduce((sum, s) => sum + s.total, 0))}</p>
+                </div>
+                <div className="rounded-lg bg-slate-50 px-3 py-2 text-center">
+                  <p className="text-[10px] uppercase tracking-wide text-slate-400">Total Paid</p>
+                  <p className="text-base font-bold text-slate-800">{formatCurrency(sales.reduce((sum, s) => sum + s.paidAmount, 0))}</p>
+                </div>
+                <div className="rounded-lg bg-rose-50 px-3 py-2 text-center">
+                  <p className="text-[10px] uppercase tracking-wide text-rose-500">Total Outstanding</p>
+                  <p className="text-base font-bold text-rose-700">{formatCurrency(sales.reduce((sum, s) => sum + invoiceBalance(s), 0))}</p>
+                </div>
+              </div>
             </div>
           )}
         </Card>

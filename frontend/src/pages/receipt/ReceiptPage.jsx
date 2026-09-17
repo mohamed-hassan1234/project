@@ -8,15 +8,8 @@ import { printA5 } from '../../utils/printA5.js';
 import { BUSINESS } from '../../constants/business.js';
 import { PageSpinner } from '../../components/ui/Spinner.jsx';
 import Button from '../../components/ui/Button.jsx';
-import Badge from '../../components/ui/Badge.jsx';
 import ConfirmDialog from '../../components/ui/ConfirmDialog.jsx';
 import logo from '../../images/logo.png';
-
-const STATUS_BADGE = {
-  DRAFT: { color: 'amber', label: 'PENDING' },
-  CONFIRMED: { color: 'green', label: 'CONFIRMED' },
-  CANCELLED: { color: 'red', label: 'CANCELLED' },
-};
 
 export default function ReceiptPage() {
   const { id } = useParams();
@@ -54,7 +47,6 @@ export default function ReceiptPage() {
   if (!sale) return <PageSpinner />;
 
   const currentOutstanding = sale.newBalance;
-  const statusBadge = STATUS_BADGE[sale.status] || { color: 'slate', label: sale.status };
 
   return (
     <div>
@@ -102,10 +94,7 @@ export default function ReceiptPage() {
 
         <div className="my-3 border-t border-dashed border-slate-300" />
 
-        <div className="flex items-center justify-between">
-          <p className="text-sm font-bold uppercase tracking-wide text-slate-800">Sales Invoice</p>
-          <span className="no-print"><Badge color={statusBadge.color}>STATUS: {statusBadge.label}</Badge></span>
-        </div>
+        <p className="text-center text-sm font-bold uppercase tracking-wide text-slate-800">Sales Invoice</p>
         {sale.status === 'DRAFT' && (
           <p className="mt-1 text-center text-[11px] font-medium text-amber-600 no-print">
             This invoice is PENDING and will only become final when the business day is closed.
