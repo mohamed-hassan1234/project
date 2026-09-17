@@ -81,7 +81,10 @@ function ItemSearchCell({ onSelect, placeholder, inputRef }) {
       </div>
 
       {open && query.trim() && (
-        <div className="absolute z-30 mt-1 w-80 max-w-[85vw] overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg">
+        // Opens upward: this cell is always the trailing/bottom row, and the
+        // desktop grid scrolls internally once it has many lines, so a
+        // downward dropdown would render past the visible, clipped area.
+        <div className="absolute bottom-full z-30 mb-1 w-80 max-w-[85vw] overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg">
           {results.length === 0 ? (
             <div className="px-3 py-2.5 text-xs text-slate-400">No matching items</div>
           ) : (
@@ -184,8 +187,10 @@ export default function SellerItemsGrid({ lines, onAddLine, onQuantityChange, on
 
   return (
     <div>
-      {/* Desktop / tablet: invoice-style grid */}
-      <div className="hidden overflow-x-auto rounded-lg border border-slate-200 sm:block">
+      {/* Desktop / tablet: invoice-style grid. Capped height with a sticky
+          header keeps a 20+ line invoice from turning the whole page into
+          one giant scroll -- only the grid body scrolls. */}
+      <div className="hidden max-h-[420px] overflow-auto rounded-lg border border-slate-200 sm:block">
         <table className="w-full text-sm">
           <colgroup>
             <col className="w-[55%]" />
@@ -194,7 +199,7 @@ export default function SellerItemsGrid({ lines, onAddLine, onQuantityChange, on
             <col className="w-[15%]" />
             <col className="w-[5%]" />
           </colgroup>
-          <thead className="bg-slate-50">
+          <thead className="sticky top-0 z-10 bg-slate-50">
             <tr>
               <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-slate-500">Item</th>
               <th className="px-2 py-2 text-center text-xs font-medium uppercase tracking-wide text-slate-500">Qty</th>

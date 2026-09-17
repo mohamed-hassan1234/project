@@ -41,3 +41,18 @@ export function expiryStatusBadge(status) {
       return { color: 'slate', label: status || 'Unknown' };
   }
 }
+
+export function quotationStatusBadge(status) {
+  switch (status) {
+    case 'Accepted':
+      return { color: 'green', label: 'Accepted' };
+    case 'Rejected':
+      return { color: 'red', label: 'Rejected' };
+    case 'Expired':
+      return { color: 'slate', label: 'Expired' };
+    case 'Converted':
+      return { color: 'blue', label: 'Converted' };
+    default:
+      return { color: 'amber', label: status || 'Pending' };
+  }
+}

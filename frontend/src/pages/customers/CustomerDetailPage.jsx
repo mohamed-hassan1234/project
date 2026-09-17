@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Wallet, Receipt, History, FileText, Pencil, XCircle, Undo2, Printer } from 'lucide-react';
+import { ArrowLeft, Wallet, Receipt, History, FileText, Pencil, XCircle, Undo2, Printer, ClipboardList } from 'lucide-react';
 import client from '../../api/client.js';
 import { useAuth } from '../../context/AuthContext.jsx';
 import { useToast } from '../../context/ToastContext.jsx';
@@ -15,6 +15,7 @@ import ConfirmDialog from '../../components/ui/ConfirmDialog.jsx';
 import { FormField, Input, Select } from '../../components/ui/Field.jsx';
 import PayDebtModal from './PayDebtModal.jsx';
 import ReturnItemsModal from './ReturnItemsModal.jsx';
+import CustomerQuotationsSection from './CustomerQuotationsSection.jsx';
 import logo from '../../images/logo.png';
 
 const LEDGER_LABELS = {
@@ -51,6 +52,7 @@ export default function CustomerDetailPage() {
   const [returnSale, setReturnSale] = useState(null);
   const [cancelTarget, setCancelTarget] = useState(null); // { sale, mode: 'cancel' | 'reverse' }
   const [cancelling, setCancelling] = useState(false);
+  const [tab, setTab] = useState('invoices');
 
   const load = useCallback(() => {
     setLoading(true);
@@ -107,7 +109,7 @@ export default function CustomerDetailPage() {
         </div>
       </div>
 
-      <div id="print-area">
+      <div>
         <Card className="mb-6 no-print">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
@@ -163,6 +165,29 @@ export default function CustomerDetailPage() {
           </Card>
         )}
 
+        <div className="mb-4 flex gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1 no-print sm:inline-flex">
+          <button
+            onClick={() => setTab('invoices')}
+            className={`flex items-center gap-1.5 rounded-md px-3.5 py-1.5 text-sm font-semibold transition-colors ${
+              tab === 'invoices' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            <Receipt className="h-4 w-4" /> Invoices
+          </button>
+          <button
+            onClick={() => setTab('quotations')}
+            className={`flex items-center gap-1.5 rounded-md px-3.5 py-1.5 text-sm font-semibold transition-colors ${
+              tab === 'quotations' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            <ClipboardList className="h-4 w-4" /> Quotations
+          </button>
+        </div>
+
+        {tab === 'quotations' ? (
+          <CustomerQuotationsSection customerId={id} customer={customer} />
+        ) : (
+        <>
         <div className="mb-4 flex flex-wrap items-end justify-between gap-3 no-print">
           <div className="flex flex-wrap items-end gap-3">
             <FormField label="From">
@@ -185,6 +210,7 @@ export default function CustomerDetailPage() {
           </Button>
         </div>
 
+        <div id="print-area">
         <Card className="mb-6" title={`Invoices (${sales.length})`}>
           {/* Print-only branded statement header -- screen navigation, filter
               controls and per-invoice action buttons never appear here. */}
@@ -364,6 +390,9 @@ export default function CustomerDetailPage() {
             </ol>
           )}
         </Card>
+        </div>
+        </>
+        )}
       </div>
 
       <PayDebtModal open={payOpen} onClose={() => setPayOpen(false)} customerId={id} onPaid={load} />

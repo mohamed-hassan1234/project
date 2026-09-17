@@ -247,7 +247,7 @@ export default function POSPage() {
   };
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6">
+    <div className="mx-auto max-w-5xl space-y-4">
       <PageHeader
         title={quotationId ? 'Convert Quotation to Invoice' : editId ? 'Edit Sales Invoice' : 'Add Sales Invoice'}
         subtitle="Find the customer, add products, and create the pending invoice"
@@ -272,11 +272,11 @@ export default function POSPage() {
         </div>
       )}
 
-      <Card>
+      <Card dense>
         <fieldset disabled={submitting || !!quotationId}><CustomerSearchBox searchValue={customerQuery} onSearchChange={setCustomerQuery} enteredCustomer={enteredCustomer} onEnteredCustomerChange={setEnteredCustomer} activeCustomer={customer} onSelect={setCustomer} onClear={() => setCustomer(null)} cartTotal={total} paidAmount={paidNum} /></fieldset>
       </Card>
 
-      <Card title="Sale Items" subtitle="Add products to this invoice">
+      <Card dense title="Sale Items">
         <fieldset disabled={submitting || !!quotationId}><SellerItemsGrid
           lines={lines}
           onAddLine={handleAddLine}
@@ -287,8 +287,8 @@ export default function POSPage() {
         /></fieldset>
       </Card>
 
-      <Card title="Payment" subtitle="Review totals and record what the customer is paying now">
-        <div className="mx-auto max-w-md space-y-2.5 text-sm">
+      <Card dense title="Payment">
+        <div className="mx-auto max-w-lg space-y-2 text-sm">
           <div className="flex justify-between text-slate-600">
             <span>Subtotal</span>
             <span className="font-medium tabular-nums text-slate-800">{formatCurrency(subtotal)}</span>
@@ -305,29 +305,28 @@ export default function POSPage() {
               disabled={submitting || !!quotationId}
             />
           </div>
-          <div className="flex justify-between border-t border-slate-100 pt-2.5 text-base font-bold text-slate-900">
+          <div className="flex justify-between border-t border-slate-100 pt-2 text-base font-bold text-slate-900">
             <span>Grand Total</span>
             <span className="tabular-nums">{formatCurrency(total)}</span>
           </div>
 
-          <div className="flex items-center justify-between pt-1">
-            <Label>Amount Paid</Label>
-            <Input
-              type="number"
-              min="0"
-              step="0.01"
-              placeholder="0.00"
-              value={paidAmount}
-              onChange={(e) => setPaidAmount(e.target.value)}
-              className="w-28 text-right tabular-nums"
-              disabled={submitting}
-            />
-          </div>
-
-          <div className="flex items-center justify-between gap-3 pt-1">
-            <Label>Payment Account</Label>
-            <div className="w-48">
+          <div className="grid grid-cols-1 gap-3 pt-1.5 sm:grid-cols-2">
+            <div>
+              <Label>Payment Account</Label>
               <AccountSelect value={paymentAccountId} onChange={setPaymentAccountId} disabled={submitting} placeholder="Select account..." />
+            </div>
+            <div>
+              <Label>Amount Paid</Label>
+              <Input
+                type="number"
+                min="0"
+                step="0.01"
+                placeholder="0.00"
+                value={paidAmount}
+                onChange={(e) => setPaidAmount(e.target.value)}
+                className="w-full text-right tabular-nums"
+                disabled={submitting}
+              />
             </div>
           </div>
           {needsAccount && <p className="text-right text-xs font-medium text-rose-600">Select an account to record this payment.</p>}
@@ -337,7 +336,7 @@ export default function POSPage() {
             <span>{formatCurrency(remaining)}</span>
           </div>
 
-          <Button className="mt-3 w-full" size="lg" loading={submitting} disabled={!canComplete} onClick={handleSubmit}>
+          <Button className="mt-2 w-full" size="lg" loading={submitting} disabled={!canComplete} onClick={handleSubmit}>
             <ShoppingCart className="h-4 w-4" /> {editId ? 'Save Changes to Draft' : 'Create Pending Invoice'}
           </Button>
           <p className="text-center text-xs text-slate-400">
@@ -347,6 +346,7 @@ export default function POSPage() {
       </Card>
 
       <Card
+        dense
         title={
           <span className="flex items-center gap-1.5">
             <ClipboardList className="h-4 w-4" /> Today's Pending Invoices
