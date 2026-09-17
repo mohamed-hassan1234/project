@@ -179,12 +179,16 @@ export const getCustomerHistory = asyncHandler(async (req, res) => {
   const customer = await Customer.findById(req.params.id);
   if (!customer) throw new ApiError(404, 'Customer not found.');
 
-  const { from, to } = req.query;
+  const { from, to, status } = req.query;
   const filter = { customer: customer._id };
   if (from || to) {
     filter.createdAt = {};
     if (from) filter.createdAt.$gte = new Date(from);
     if (to) filter.createdAt.$lte = new Date(to);
+  }
+  if (status) {
+    if (!['DRAFT', 'CONFIRMED', 'CANCELLED'].includes(status)) throw new ApiError(400, 'Invalid invoice status filter.');
+    filter.status = status;
   }
 
   const sales = await Sale.find(filter).sort({ createdAt: -1 });

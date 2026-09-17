@@ -10,6 +10,7 @@ import {
   BarChart3,
   Wallet,
   FileText,
+  Receipt,
   LogOut,
   Menu,
   X,
@@ -29,6 +30,7 @@ const navItems = [
   { to: '/accounts', label: 'Accounts', icon: Wallet },
   { to: '/customers', label: 'Customers', icon: Users },
   { to: '/suppliers', label: 'Suppliers', icon: Building2 },
+  { to: '/supplier-invoices', label: 'Supplier Invoices', icon: Receipt },
   { to: '/reports', label: 'Reports', icon: BarChart3 },
 ];
 

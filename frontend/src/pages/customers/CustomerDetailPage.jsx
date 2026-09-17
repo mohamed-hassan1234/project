@@ -1,16 +1,17 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Wallet, Receipt, History, FileText, Pencil, XCircle, Undo2 } from 'lucide-react';
+import { ArrowLeft, Wallet, Receipt, History, FileText, Pencil, XCircle, Undo2, Printer } from 'lucide-react';
 import client from '../../api/client.js';
 import { useAuth } from '../../context/AuthContext.jsx';
 import { useToast } from '../../context/ToastContext.jsx';
 import { formatCurrency, formatDate, formatDateTime } from '../../utils/format.js';
+import { printReport } from '../../utils/printReport.js';
 import { PageSpinner } from '../../components/ui/Spinner.jsx';
 import Card from '../../components/ui/Card.jsx';
 import Button from '../../components/ui/Button.jsx';
 import Badge from '../../components/ui/Badge.jsx';
 import ConfirmDialog from '../../components/ui/ConfirmDialog.jsx';
-import { FormField, Input } from '../../components/ui/Field.jsx';
+import { FormField, Input, Select } from '../../components/ui/Field.jsx';
 import PayDebtModal from './PayDebtModal.jsx';
 import ReturnItemsModal from './ReturnItemsModal.jsx';
 
@@ -21,6 +22,8 @@ const LEDGER_LABELS = {
   SALE_VOID: { label: 'Sale Voided', color: 'slate' },
   REFUND: { label: 'Refund', color: 'amber' },
 };
+
+const INVOICE_STATUS_LABEL = { DRAFT: 'Draft', CONFIRMED: 'Completed', CANCELLED: 'Cancelled' };
 
 export default function CustomerDetailPage() {
   const { id } = useParams();
@@ -33,6 +36,7 @@ export default function CustomerDetailPage() {
   const [loading, setLoading] = useState(true);
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
+  const [status, setStatus] = useState('');
   const [payOpen, setPayOpen] = useState(false);
   const [returnSale, setReturnSale] = useState(null);
   const [cancelTarget, setCancelTarget] = useState(null); // { sale, mode: 'cancel' | 'reverse' }
@@ -41,7 +45,7 @@ export default function CustomerDetailPage() {
   const load = useCallback(() => {
     setLoading(true);
     Promise.all([
-      client.get(`/customers/${id}/history`, { params: { from: from || undefined, to: to || undefined } }),
+      client.get(`/customers/${id}/history`, { params: { from: from || undefined, to: to || undefined, status: status || undefined } }),
       client.get(`/customers/${id}/debt`),
     ])
       .then(([historyRes, debtRes]) => {
@@ -50,7 +54,7 @@ export default function CustomerDetailPage() {
       })
       .catch((err) => toast.error(err.friendlyMessage || 'Failed to load customer.'))
       .finally(() => setLoading(false));
-  }, [id, from, to]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [id, from, to, status]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => load(), [load]);
 
@@ -94,7 +98,7 @@ export default function CustomerDetailPage() {
       </div>
 
       <div id="print-area">
-        <Card className="mb-6">
+        <Card className="mb-6 no-print">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
               <h1 className="text-xl font-bold text-slate-900">{customer.name}</h1>
@@ -121,7 +125,7 @@ export default function CustomerDetailPage() {
         </Card>
 
         {debt && debt.invoices.length > 0 && (
-          <Card className="mb-6" title={`Where This Debt Came From (${debt.invoices.length} invoice${debt.invoices.length > 1 ? 's' : ''})`}>
+          <Card className="mb-6 no-print" title={`Where This Debt Came From (${debt.invoices.length} invoice${debt.invoices.length > 1 ? 's' : ''})`}>
             <div className="space-y-2">
               {debt.invoices.map((inv) => (
                 <div key={inv.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-100 px-3 py-2.5">
@@ -149,18 +153,36 @@ export default function CustomerDetailPage() {
           </Card>
         )}
 
-        <div className="mb-4 flex flex-wrap items-end gap-3 no-print">
-          <FormField label="From">
-            <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
-          </FormField>
-          <FormField label="To">
-            <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
-          </FormField>
+        <div className="mb-4 flex flex-wrap items-end justify-between gap-3 no-print">
+          <div className="flex flex-wrap items-end gap-3">
+            <FormField label="From">
+              <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+            </FormField>
+            <FormField label="To">
+              <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+            </FormField>
+            <FormField label="Invoice Status">
+              <Select value={status} onChange={(e) => setStatus(e.target.value)}>
+                <option value="">All</option>
+                <option value="CANCELLED">Cancelled</option>
+                <option value="DRAFT">Draft</option>
+                <option value="CONFIRMED">Completed</option>
+              </Select>
+            </FormField>
+          </div>
+          <Button variant="secondary" onClick={() => printReport('portrait')} disabled={sales.length === 0}>
+            <Printer className="h-4 w-4" /> Print
+          </Button>
         </div>
 
-        <Card className="mb-6" title={`Purchase History (${sales.length})`}>
+        <Card className="mb-6" title={`Invoices (${sales.length})`}>
+          <div className="mb-4 hidden print:block">
+            <p className="text-sm font-bold text-slate-900">Customer: {customer.name}</p>
+            <p className="text-xs text-slate-500">Invoice Status: {status ? INVOICE_STATUS_LABEL[status] : 'All'}</p>
+            <p className="text-xs text-slate-500">Date Range: {from || to ? `${from || 'Start'} – ${to || 'Today'}` : 'All History'}</p>
+          </div>
           {sales.length === 0 ? (
-            <p className="py-8 text-center text-sm text-slate-400">No purchases in this date range.</p>
+            <p className="py-8 text-center text-sm text-slate-400">No invoices match the current filter.</p>
           ) : (
             <div className="space-y-3">
               {sales.map((s) => (
@@ -238,9 +260,22 @@ export default function CustomerDetailPage() {
               ))}
             </div>
           )}
+          {sales.length > 0 && (
+            <div className="mt-4 hidden justify-end gap-4 border-t border-slate-200 pt-3 text-sm print:flex">
+              <span>
+                Total Amount: <strong className="text-slate-800">{formatCurrency(sales.reduce((sum, s) => sum + s.total, 0))}</strong>
+              </span>
+              <span>
+                Total Paid: <strong className="text-slate-800">{formatCurrency(sales.reduce((sum, s) => sum + s.paidAmount, 0))}</strong>
+              </span>
+              <span className="font-semibold text-rose-600">
+                Outstanding: {formatCurrency(sales.reduce((sum, s) => sum + s.outstanding, 0))}
+              </span>
+            </div>
+          )}
         </Card>
 
-        <Card title={<span className="flex items-center gap-1.5"><History className="h-4 w-4" /> Transaction Timeline</span>}>
+        <Card className="no-print" title={<span className="flex items-center gap-1.5"><History className="h-4 w-4" /> Transaction Timeline</span>}>
           {!timeline || timeline.length === 0 ? (
             <p className="py-8 text-center text-sm text-slate-400">No balance-affecting transactions yet.</p>
           ) : (

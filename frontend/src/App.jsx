@@ -21,6 +21,7 @@ import CustomerDetailPage from './pages/customers/CustomerDetailPage.jsx';
 import CustomerStatementPage from './pages/customers/CustomerStatementPage.jsx';
 import SuppliersPage from './pages/suppliers/SuppliersPage.jsx';
 import SupplierDetailPage from './pages/suppliers/SupplierDetailPage.jsx';
+import SupplierInvoicesPage from './pages/suppliers/SupplierInvoicesPage.jsx';
 import AccountsPage from './pages/accounts/AccountsPage.jsx';
 import ReportsPage from './pages/reports/ReportsPage.jsx';
 import ReceiptPage from './pages/receipt/ReceiptPage.jsx';
@@ -63,6 +64,7 @@ export default function App() {
               <Route path="/customers/:id/statement" element={<CustomerStatementPage />} />
               <Route path="/suppliers" element={<SuppliersPage />} />
               <Route path="/suppliers/:id" element={<SupplierDetailPage />} />
+              <Route path="/supplier-invoices" element={<SupplierInvoicesPage />} />
               <Route path="/accounts" element={<AccountsPage />} />
               <Route path="/reports" element={<ReportsPage />} />
               <Route path="/receipt/:id" element={<ReceiptPage />} />

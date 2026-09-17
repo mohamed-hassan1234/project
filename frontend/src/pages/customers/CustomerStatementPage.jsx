@@ -105,17 +105,6 @@ export default function CustomerStatementPage() {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <SummaryTile label="Finalized Invoices" value={summary.numberOfFinalizedInvoices} />
-          <SummaryTile label="Total Purchased" value={formatCurrency(summary.totalAmountPurchased)} />
-          <SummaryTile label="Total Payments" value={formatCurrency(summary.totalPayments)} />
-          <SummaryTile label="Credit Generated" value={formatCurrency(summary.totalCreditGenerated)} />
-        </div>
-        <div className="mt-3 rounded-lg bg-rose-50 px-4 py-3 text-center">
-          <p className="text-xs uppercase tracking-wide text-rose-500">Current Outstanding Balance</p>
-          <p className="text-xl font-bold text-rose-700">{formatCurrency(summary.currentOutstandingBalance)}</p>
-        </div>
-
         {pendingToday.length > 0 && (
           <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 no-print">
             <p className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-amber-700">
@@ -214,6 +203,20 @@ export default function CustomerStatementPage() {
             </div>
           </div>
         )}
+
+        <div className="mt-6 border-t border-dashed border-slate-300 pt-4" style={{ pageBreakInside: 'avoid' }}>
+          <p className="mb-2 text-sm font-bold uppercase tracking-wide text-slate-700">Final Customer Summary</p>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <SummaryTile label="Finalized Invoices" value={summary.numberOfFinalizedInvoices} />
+            <SummaryTile label="Total Purchased" value={formatCurrency(summary.totalAmountPurchased)} />
+            <SummaryTile label="Total Paid" value={formatCurrency(summary.totalPayments)} />
+            <SummaryTile label="Credit Generated" value={formatCurrency(summary.totalCreditGenerated)} />
+          </div>
+          <div className="mt-3 rounded-lg bg-rose-50 px-4 py-3 text-center">
+            <p className="text-xs uppercase tracking-wide text-rose-500">Outstanding / Debt Balance</p>
+            <p className="text-xl font-bold text-rose-700">{formatCurrency(summary.currentOutstandingBalance)}</p>
+          </div>
+        </div>
 
         <div className="mt-6 border-t border-dashed border-slate-300 pt-3">
           <p className="text-center text-[11px] text-slate-400">Thank you for your business!</p>
