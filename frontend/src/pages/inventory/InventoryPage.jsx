@@ -1,11 +1,10 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Plus, Search, Pencil, Trash2, Eye } from 'lucide-react';
+import { Search, Pencil, Trash2, Eye } from 'lucide-react';
 import client from '../../api/client.js';
 import { useDebounce } from '../../hooks/useDebounce.js';
 import { useToast } from '../../context/ToastContext.jsx';
 import { formatCurrency, formatDate } from '../../utils/format.js';
 import PageHeader from '../../components/ui/PageHeader.jsx';
-import Button from '../../components/ui/Button.jsx';
 import { Input, Select } from '../../components/ui/Field.jsx';
 import { Table, THead, Th, TBody, Td, TableEmpty, TableLoading } from '../../components/ui/Table.jsx';
 import Pagination from '../../components/ui/Pagination.jsx';
@@ -87,20 +86,7 @@ export default function InventoryPage() {
 
   return (
     <div>
-      <PageHeader
-        title="Inventory"
-        subtitle="Manage products, stock levels and pricing"
-        actions={
-          <Button
-            onClick={() => {
-              setEditItem(null);
-              setFormOpen(true);
-            }}
-          >
-            <Plus className="h-4 w-4" /> Add Item
-          </Button>
-        }
-      />
+      <PageHeader title="Inventory" subtitle="Manage products, stock levels and pricing" />
 
       <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-6">
         <div className="relative lg:col-span-2">

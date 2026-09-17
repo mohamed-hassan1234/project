@@ -77,16 +77,20 @@ export default function SupplierInvoicesPage() {
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState(null);
+  const [entrySearch, setEntrySearch] = useState('');
+  const debouncedEntrySearch = useDebounce(entrySearch, 250);
 
   useEffect(() => {
     if (!supplier) { setEntries([]); setSelected(null); return; }
     setLoading(true);
     client
-      .get('/stock', { params: { supplier: supplier.id, page: 1 } })
-      .then((res) => { setEntries(res.data.data); setSelected(res.data.data[0] || null); })
+      .get('/stock', { params: { supplier: supplier.id, q: debouncedEntrySearch, page: 1 } })
+      .then((res) => { setEntries(res.data.data); setSelected((prev) => res.data.data.find((e) => e._id === prev?._id) || res.data.data[0] || null); })
       .catch((err) => toast.error(err.friendlyMessage || 'Failed to load stock entries for this supplier.'))
       .finally(() => setLoading(false));
-  }, [supplier]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [supplier, debouncedEntrySearch]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => setEntrySearch(''), [supplier]);
 
   const totalCost = selected ? selected.rows.reduce((sum, r) => sum + r.quantity * r.costPriceCents, 0) / 100 : 0;
 
@@ -111,10 +115,19 @@ export default function SupplierInvoicesPage() {
       {supplier && (
         <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
           <Card title={`Stock Entries (${entries.length})`} className="no-print h-fit">
+            <div className="relative mb-3">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <Input
+                className="pl-9"
+                value={entrySearch}
+                onChange={(e) => setEntrySearch(e.target.value)}
+                placeholder="Search by shop/supplier serial or stock no..."
+              />
+            </div>
             {loading ? (
               <p className="py-6 text-center text-sm text-slate-400">Loading...</p>
             ) : entries.length === 0 ? (
-              <p className="py-6 text-center text-sm text-slate-400">No stock entries linked to this supplier yet.</p>
+              <p className="py-6 text-center text-sm text-slate-400">{entrySearch ? 'No stock entries match that search.' : 'No stock entries linked to this supplier yet.'}</p>
             ) : (
               <div className="divide-y divide-slate-100">
                 {entries.map((entry) => (
