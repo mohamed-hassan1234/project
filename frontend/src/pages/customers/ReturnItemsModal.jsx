@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import Modal from '../../components/ui/Modal.jsx';
 import Button from '../../components/ui/Button.jsx';
 import { Input } from '../../components/ui/Field.jsx';
@@ -12,6 +13,7 @@ import { formatCurrency } from '../../utils/format.js';
 // side -- this only collects the quantities being returned.
 export default function ReturnItemsModal({ open, onClose, sale, onReturned }) {
   const toast = useToast();
+  const navigate = useNavigate();
   const [quantities, setQuantities] = useState({});
   const [reason, setReason] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -40,10 +42,12 @@ export default function ReturnItemsModal({ open, onClose, sale, onReturned }) {
     }
     setSubmitting(true);
     try {
-      await client.post(`/sales/${sale.id}/return`, { items, reason });
+      const res = await client.post(`/sales/${sale.id}/return`, { items, reason });
       toast.success('Items returned. Stock and balances have been reconciled.');
       onReturned();
       onClose();
+      const newReturnIndex = res.data.data.returns.length - 1;
+      navigate(`/receipt/${sale.id}/return/${newReturnIndex}`);
     } catch (err) {
       toast.error(err.friendlyMessage || 'Could not process this return.');
     } finally {

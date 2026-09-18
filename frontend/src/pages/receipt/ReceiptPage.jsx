@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { Printer, ArrowLeft, Pencil, XCircle } from 'lucide-react';
+import { Printer, ArrowLeft, Pencil, XCircle, Undo2 } from 'lucide-react';
 import client from '../../api/client.js';
 import { useToast } from '../../context/ToastContext.jsx';
 import { formatCurrency, formatDate, formatTime } from '../../utils/format.js';
@@ -197,6 +197,24 @@ export default function ReceiptPage() {
         <div className="my-3 border-t border-dashed border-slate-300" />
         <p className="text-center text-[11px] text-slate-400">Thank you for your business!</p>
       </div>
+
+      {sale.returns?.length > 0 && (
+        <div className="mx-auto mt-4 max-w-[148mm] rounded-2xl border border-slate-200 bg-white p-4 text-sm no-print">
+          <p className="mb-2 flex items-center gap-1.5 font-semibold text-slate-700">
+            <Undo2 className="h-4 w-4" /> Returns on This Invoice ({sale.returns.length})
+          </p>
+          <div className="space-y-1.5">
+            {sale.returns.map((r, i) => (
+              <div key={i} className="flex items-center justify-between rounded-lg border border-slate-100 px-3 py-2 text-xs">
+                <span className="text-slate-500">{formatDate(r.createdAt)} · {formatCurrency(r.amount)}</span>
+                <Link to={`/receipt/${sale.id}/return/${r.index}`} className="font-semibold text-indigo-600 hover:underline">
+                  View / Print
+                </Link>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

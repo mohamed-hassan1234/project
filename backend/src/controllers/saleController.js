@@ -59,12 +59,15 @@ function toDTO(sale) {
     updatedAt: sale.updatedAt,
     quotation: sale.quotation || null,
     settledPaidAmount: fromCents(sale.status === 'CONFIRMED' ? sale.totalCents - sale.outstandingCents : sale.paidAmountCents),
-    returns: (sale.returns || []).map((r) => ({
-      items: r.items.map((i) => ({ item: i.item, name: i.itemName, quantity: i.quantity, unitPrice: fromCents(i.unitPriceCents) })),
+    returns: (sale.returns || []).map((r, i) => ({
+      index: i,
+      items: r.items.map((i2) => ({ item: i2.item, name: i2.itemName, quantity: i2.quantity, unitPrice: fromCents(i2.unitPriceCents) })),
       amount: fromCents(r.amountCents),
       debtReduced: fromCents(r.debtReducedCents),
       refund: fromCents(r.refundCents),
       reason: r.reason,
+      invoiceBalanceAfter: r.invoiceBalanceAfterCents != null ? fromCents(r.invoiceBalanceAfterCents) : null,
+      customerBalanceAfter: r.customerBalanceAfterCents != null ? fromCents(r.customerBalanceAfterCents) : null,
       createdAt: r.createdAt,
     })),
   };
@@ -511,17 +514,25 @@ export const returnSale = asyncHandler(async (req, res) => {
     sale.balanceAddedCents -= reduceFromOutstanding;
     sale.outstandingCents -= reduceFromOutstanding;
     sale.paidAmountCents -= refundCents;
+
+    // Resolved before the return entry is pushed so the Return Receipt can
+    // show the balances exactly as they stood right after this return, even
+    // if the invoice/customer changes again later.
+    const customer = await Customer.findById(sale.customer).session(session);
+    const customerBalanceAfterCents = customer ? customer.balanceCents - reduceFromOutstanding : null;
+
     sale.returns.push({
       items: returnedLines.map(({ qty, line }) => ({ item: line.item, itemName: line.itemName, quantity: qty, unitPriceCents: line.unitPriceCents })),
       amountCents: deltaCents,
       debtReducedCents: reduceFromOutstanding,
       refundCents,
       reason,
+      invoiceBalanceAfterCents: sale.outstandingCents,
+      customerBalanceAfterCents,
       createdBy: req.user?._id,
     });
     await sale.save({ session });
 
-    const customer = await Customer.findById(sale.customer).session(session);
     if (customer) {
       const previousBalanceCents = customer.balanceCents;
       customer.balanceCents -= reduceFromOutstanding;

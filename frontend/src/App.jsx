@@ -28,6 +28,7 @@ import ReportsPage from './pages/reports/ReportsPage.jsx';
 import ReceiptPage from './pages/receipt/ReceiptPage.jsx';
 import PaymentReceiptPage from './pages/receipt/PaymentReceiptPage.jsx';
 import PurchaseReceiptPage from './pages/receipt/PurchaseReceiptPage.jsx';
+import ReturnReceiptPage from './pages/receipt/ReturnReceiptPage.jsx';
 import NotFound from './pages/NotFound.jsx';
 
 function POSWorkspace() { const location = useLocation(); return <POSPage key={location.search} />; }
@@ -70,6 +71,7 @@ export default function App() {
               <Route path="/accounts" element={<AccountsPage />} />
               <Route path="/reports" element={<ReportsPage />} />
               <Route path="/receipt/:id" element={<ReceiptPage />} />
+              <Route path="/receipt/:id/return/:index" element={<ReturnReceiptPage />} />
               <Route path="/payment-receipt/:id" element={<PaymentReceiptPage />} />
             </Route>
 
