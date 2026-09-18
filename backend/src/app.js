@@ -16,6 +16,7 @@ import reportRoutes from './routes/reports.js';
 import dashboardRoutes from './routes/dashboard.js';
 import accountRoutes from './routes/accounts.js';
 import dayCloseRoutes from './routes/dayClose.js';
+import supplierInvoiceArchiveRoutes from './routes/supplierInvoiceArchives.js';
 
 import { notFoundHandler, errorHandler } from './middleware/errorHandler.js';
 import { ApiError } from './utils/ApiError.js';
@@ -67,6 +68,7 @@ app.use('/api/reports', reportRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/accounts', accountRoutes);
 app.use('/api/day-close', dayCloseRoutes);
+app.use('/api/supplier-invoice-archives', supplierInvoiceArchiveRoutes);
 
 app.use(notFoundHandler);
 app.use(errorHandler);

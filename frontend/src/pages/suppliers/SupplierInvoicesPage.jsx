@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { Search, X, Printer, FileText } from 'lucide-react';
+import { Search, X, Printer, FileText, Boxes, PenLine } from 'lucide-react';
+import ManualSupplierInvoiceArchive from './ManualSupplierInvoiceArchive.jsx';
 import client from '../../api/client.js';
 import { useToast } from '../../context/ToastContext.jsx';
 import { useDebounce } from '../../hooks/useDebounce.js';
@@ -79,6 +80,7 @@ export default function SupplierInvoicesPage() {
   const [selected, setSelected] = useState(null);
   const [entrySearch, setEntrySearch] = useState('');
   const debouncedEntrySearch = useDebounce(entrySearch, 250);
+  const [tab, setTab] = useState('stock');
 
   useEffect(() => {
     if (!supplier) { setEntries([]); setSelected(null); return; }
@@ -101,6 +103,29 @@ export default function SupplierInvoicesPage() {
         subtitle="Generate purchase-facing invoices directly from existing Stock Entries -- no selling price, no duplicated products."
       />
 
+      <div className="flex gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1 no-print sm:inline-flex">
+        <button
+          onClick={() => setTab('stock')}
+          className={`flex items-center gap-1.5 rounded-md px-3.5 py-1.5 text-sm font-semibold transition-colors ${
+            tab === 'stock' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+          }`}
+        >
+          <Boxes className="h-4 w-4" /> From Stock
+        </button>
+        <button
+          onClick={() => setTab('manual')}
+          className={`flex items-center gap-1.5 rounded-md px-3.5 py-1.5 text-sm font-semibold transition-colors ${
+            tab === 'manual' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+          }`}
+        >
+          <PenLine className="h-4 w-4" /> Manual Entry / Archive
+        </button>
+      </div>
+
+      {tab === 'manual' ? (
+        <ManualSupplierInvoiceArchive />
+      ) : (
+      <>
       <Card className="no-print">
         <div className="space-y-1">
           <label className="text-sm font-medium text-slate-700">Supplier</label>
@@ -230,6 +255,8 @@ export default function SupplierInvoicesPage() {
             </div>
           )}
         </div>
+      )}
+      </>
       )}
     </div>
   );
