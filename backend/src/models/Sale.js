@@ -25,11 +25,16 @@ const saleItemSchema = new mongoose.Schema(
     serialNumber: { type: String, default: '' },
     sku: { type: String, default: '' }, // legacy, kept for historical records
     quantity: { type: Number, required: true, min: 1 },
-    unitPriceCents: { type: Number, required: true, min: 0 }, // selling price at time of sale
-    // Estimated at Draft creation time (item's current cost price); replaced
-    // with the real FIFO-weighted cost the moment the sale is CONFIRMED.
+    unitPriceCents: { type: Number, required: true, min: 0 }, // selling price (rate) at time of sale -- cashier-editable per line
+    // Estimated at Draft creation time (cashier-editable override, or the
+    // item's current cost price if not overridden); replaced with the real
+    // FIFO-weighted cost the moment the sale is CONFIRMED at Close Day, so
+    // this estimate never becomes the historical COGS figure.
     costPriceCents: { type: Number, required: true, min: 0 },
-    subtotalCents: { type: Number, required: true, min: 0 },
+    // Per-line discount at time of sale, in addition to the invoice-level
+    // Sale.discountCents. Historical -- never recalculated later.
+    discountCents: { type: Number, default: 0, min: 0 },
+    subtotalCents: { type: Number, required: true, min: 0 }, // gross: quantity * unitPriceCents (before this line's discount)
     batchReservations: { type: [lotConsumptionSchema], default: [] },
     lotConsumption: { type: [lotConsumptionSchema], default: [] },
     // Cumulative quantity returned via POST /sales/:id/return. Never exceeds

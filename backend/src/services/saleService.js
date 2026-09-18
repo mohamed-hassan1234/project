@@ -23,9 +23,36 @@ export function validateSaleItems({ items, discount, paidAmount }) {
     if (!Number.isSafeInteger(Number(line.quantity)) || Number(line.quantity) <= 0) {
       throw new ApiError(400, 'Quantity must be greater than zero for every product.');
     }
+    if (line.unitPrice != null && (!Number.isFinite(Number(line.unitPrice)) || Number(line.unitPrice) < 0)) {
+      throw new ApiError(400, 'Rate cannot be negative.');
+    }
+    if (line.costPrice != null && (!Number.isFinite(Number(line.costPrice)) || Number(line.costPrice) < 0)) {
+      throw new ApiError(400, 'Cost price cannot be negative.');
+    }
+    if (line.discount != null && (!Number.isFinite(Number(line.discount)) || Number(line.discount) < 0)) {
+      throw new ApiError(400, 'Line discount cannot be negative.');
+    }
   }
   if (!Number.isFinite(Number(discount)) || !Number.isSafeInteger(toCents(discount)) || Number(discount) < 0) throw new ApiError(400, 'Discount cannot be negative.');
   if (!Number.isFinite(Number(paidAmount)) || !Number.isSafeInteger(toCents(paidAmount)) || Number(paidAmount) < 0) throw new ApiError(400, 'Paid amount cannot be negative.');
+}
+
+// Resolves one sale line's cashier-editable pricing (rate, cost estimate,
+// line discount) against its product, validating none of them are invalid.
+// `quotedUnitPriceCents`, when provided (quotation conversion), always wins
+// over any rate the request body supplies -- an accepted quotation's price
+// is never re-editable through this path.
+export function resolveLinePricing(line, item, quotedUnitPriceCents) {
+  const qty = Math.round(Number(line.quantity));
+  const unitPriceCents = quotedUnitPriceCents != null ? quotedUnitPriceCents : line.unitPrice != null ? toCents(line.unitPrice) : item.sellingPriceCents;
+  if (!Number.isSafeInteger(unitPriceCents) || unitPriceCents < 0) throw new ApiError(400, `Invalid rate for "${item.name}".`);
+  const costPriceCents = line.costPrice != null ? toCents(line.costPrice) : item.costPriceCents;
+  if (!Number.isSafeInteger(costPriceCents) || costPriceCents < 0) throw new ApiError(400, `Invalid cost price for "${item.name}".`);
+  const grossCents = unitPriceCents * qty;
+  const discountCents = line.discount != null ? toCents(line.discount) : 0;
+  if (!Number.isSafeInteger(discountCents) || discountCents < 0) throw new ApiError(400, `Invalid discount for "${item.name}".`);
+  if (discountCents > grossCents) throw new ApiError(400, `Discount for "${item.name}" cannot exceed its line total.`);
+  return { unitPriceCents, costPriceCents, discountCents, subtotalCents: grossCents };
 }
 
 
@@ -51,6 +78,7 @@ export async function createSaleDraft(payload, user, session, { quotedPrices, qu
 
     const saleItems = [];
     let subtotalCents = 0;
+    let lineDiscountTotalCents = 0;
 
     for (const line of items) {
       const item = await InventoryItem.findById(line.itemId).session(session);
@@ -60,9 +88,8 @@ export async function createSaleDraft(payload, user, session, { quotedPrices, qu
       const qty = Math.round(Number(line.quantity));
       const batchReservations = await reserveStock(item._id, qty, session);
 
-      const unitPriceCents = quotedPrices ? quotedPrices.get(String(item._id)) : item.sellingPriceCents;
-      if (!Number.isSafeInteger(unitPriceCents) || unitPriceCents < 0) throw new ApiError(400, 'Invalid quoted price.');
-      const subtotalLineCents = unitPriceCents * qty;
+      const quotedUnitPriceCents = quotedPrices ? quotedPrices.get(String(item._id)) : null;
+      const { unitPriceCents, costPriceCents, discountCents: lineDiscountCents, subtotalCents: subtotalLineCents } = resolveLinePricing(line, item, quotedUnitPriceCents);
 
       saleItems.push({
         item: item._id,
@@ -71,16 +98,18 @@ export async function createSaleDraft(payload, user, session, { quotedPrices, qu
         serialNumber: item.serialNumber,
         quantity: qty,
         unitPriceCents,
-        costPriceCents: item.costPriceCents, // estimate; finalized at Close Day
+        costPriceCents, // estimate; finalized at Close Day
+        discountCents: lineDiscountCents,
         subtotalCents: subtotalLineCents,
         lotConsumption: [],
         batchReservations,
       });
 
       subtotalCents += subtotalLineCents;
+      lineDiscountTotalCents += lineDiscountCents;
     }
 
-    const discountCents = Math.min(toCents(discount), subtotalCents);
+    const discountCents = Math.min(toCents(discount) + lineDiscountTotalCents, subtotalCents);
     const totalCents = subtotalCents - discountCents;
     let paidAmountCents = toCents(paidAmount);
     if (paidAmountCents > totalCents) paidAmountCents = totalCents;

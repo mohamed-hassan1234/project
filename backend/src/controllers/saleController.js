@@ -1,4 +1,4 @@
-import { createSaleDraft, validateSaleItems } from '../services/saleService.js';
+import { createSaleDraft, validateSaleItems, resolveLinePricing } from '../services/saleService.js';
 import Sale from '../models/Sale.js';
 import Customer from '../models/Customer.js';
 import InventoryItem from '../models/InventoryItem.js';
@@ -33,7 +33,10 @@ function toDTO(sale) {
       quantity: i.quantity,
       returnedQuantity: i.returnedQuantity || 0,
       unitPrice: fromCents(i.unitPriceCents),
+      costPrice: fromCents(i.costPriceCents),
+      discount: fromCents(i.discountCents),
       subtotal: fromCents(i.subtotalCents),
+      lineTotal: fromCents(i.subtotalCents - (i.discountCents || 0)),
       allocations: i.lotConsumption,
       batchReservations: i.batchReservations,
     })),
@@ -124,14 +127,14 @@ export const updateSale = asyncHandler(async (req, res) => {
 
     const saleItems = [];
     let subtotalCents = 0;
+    let lineDiscountTotalCents = 0;
     for (const line of items) {
       const item = await InventoryItem.findById(line.itemId).session(session);
       if (!item) throw new ApiError(404, `Product not found (id: ${line.itemId}).`);
       const qty = Math.round(Number(line.quantity));
       const batchReservations = await reserveStock(item._id, qty, session);
 
-      const unitPriceCents = item.sellingPriceCents;
-      const subtotalLineCents = unitPriceCents * qty;
+      const { unitPriceCents, costPriceCents, discountCents: lineDiscountCents, subtotalCents: subtotalLineCents } = resolveLinePricing(line, item);
       saleItems.push({
         item: item._id,
         itemName: item.name,
@@ -139,15 +142,17 @@ export const updateSale = asyncHandler(async (req, res) => {
         serialNumber: item.serialNumber,
         quantity: qty,
         unitPriceCents,
-        costPriceCents: item.costPriceCents,
+        costPriceCents,
+        discountCents: lineDiscountCents,
         subtotalCents: subtotalLineCents,
         lotConsumption: [],
         batchReservations,
       });
       subtotalCents += subtotalLineCents;
+      lineDiscountTotalCents += lineDiscountCents;
     }
 
-    const discountCents = Math.min(toCents(discount), subtotalCents);
+    const discountCents = Math.min(toCents(discount) + lineDiscountTotalCents, subtotalCents);
     const totalCents = subtotalCents - discountCents;
     let paidAmountCents = toCents(paidAmount);
     if (paidAmountCents > totalCents) paidAmountCents = totalCents;

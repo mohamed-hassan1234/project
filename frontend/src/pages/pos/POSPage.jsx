@@ -33,7 +33,9 @@ export default function POSPage() {
   const [storageWarning, setStorageWarning] = useState(false);
 
   const [customer, setCustomer] = useState(restored?.customer || null);
-  const [lines, setLines] = useState(restored?.lines || []);
+  // Normalizes lines restored from an older cached draft that predates
+  // per-line Cost Price/Discount so those cells never render as blank/NaN.
+  const [lines, setLines] = useState(() => (restored?.lines || []).map((l) => ({ costPrice: 0, discount: 0, ...l })));
   const [discount, setDiscount] = useState(restored?.discount ?? '0');
   const [paidAmount, setPaidAmount] = useState(restored?.paidAmount ?? '');
   const [paymentAccountId, setPaymentAccountId] = useState(restored?.paymentAccountId || null);
@@ -88,6 +90,8 @@ export default function POSPage() {
               itemCode: i.itemCode,
               serialNumber: i.serialNumber,
               unitPrice: i.unitPrice,
+              costPrice: i.costPrice ?? item.costPrice,
+              discount: i.discount || 0,
               quantity: i.quantity,
               available: item.availableQuantity + i.quantity,
             };
@@ -116,7 +120,7 @@ export default function POSPage() {
         const [customerResult, ...products] = await Promise.all([client.get(`/customers/${q.customer}`), ...q.items.map(i => client.get(`/inventory/${i.itemId}`))]);
         if (!active) return;
         setCustomer(customerResult.data.data);
-        setLines(q.items.map((i, index) => ({ ...i, available: products[index].data.data.availableQuantity })));
+        setLines(q.items.map((i, index) => ({ ...i, costPrice: products[index].data.data.costPrice, available: products[index].data.data.availableQuantity })));
         setDiscount(String(q.totalDiscount));
         setQuotation(q);
       } catch (err) { if (active) toast.error(err.friendlyMessage || err.message || 'Unable to load quotation.'); }
@@ -134,13 +138,15 @@ export default function POSPage() {
   }, [storageKey, customer, lines, discount, paidAmount, paymentAccountId, customerQuery, enteredCustomer, quotation, editReceiptNumber, loadingDraft]);
 
   const subtotal = useMemo(() => lines.reduce((sum, l) => sum + l.unitPrice * l.quantity, 0), [lines]);
-  const discountNum = Math.min(Number(discount) || 0, subtotal);
+  const lineDiscountTotal = useMemo(() => lines.reduce((sum, l) => sum + (Number(l.discount) || 0), 0), [lines]);
+  const discountNum = Math.min((Number(discount) || 0) + lineDiscountTotal, subtotal);
   const total = Math.max(0, subtotal - discountNum);
   const paidNum = Math.min(Number(paidAmount) || 0, total);
   const remaining = Math.max(0, total - paidNum);
   const hasOverStock = lines.some((l) => l.quantity > l.available || l.quantity <= 0);
+  const hasInvalidDiscount = lines.some((l) => (Number(l.discount) || 0) > l.quantity * l.unitPrice);
   const needsAccount = paidNum > 0 && !paymentAccountId;
-  const canComplete = !submitting && !loadingDraft && (!quotationId || !!quotation) && !!customer && lines.length > 0 && !hasOverStock && !needsAccount;
+  const canComplete = !submitting && !loadingDraft && (!quotationId || !!quotation) && !!customer && lines.length > 0 && !hasOverStock && !hasInvalidDiscount && !needsAccount;
 
   const handleAddLine = (product) => {
     setLines((prev) => {
@@ -160,6 +166,8 @@ export default function POSPage() {
           itemCode: product.itemCode,
           serialNumber: product.serialNumber,
           unitPrice: product.sellingPrice,
+          costPrice: product.costPrice,
+          discount: 0,
           quantity: 1,
           available: product.availableQuantity,
         },
@@ -167,12 +175,17 @@ export default function POSPage() {
     });
   };
 
-  const handleQuantityChange = (itemId, qty) => {
+  // Handles Qty/Cost Price/Rate/Discount edits from the Excel-style grid.
+  // Cost Price and Rate are independent -- editing one never touches the
+  // other. Cost Price is only an estimate shown for margin visibility; the
+  // real FIFO-weighted cost is still computed at Close Day regardless of
+  // what is typed here, so historical COGS is never corrupted by it.
+  const handleLineChange = (itemId, field, value) => {
     setLines((prev) =>
       prev.map((l) => {
         if (l.itemId !== itemId) return l;
-        const bounded = Math.max(1, Math.round(qty) || 1);
-        return { ...l, quantity: bounded };
+        if (field === 'quantity') return { ...l, quantity: Math.max(1, Math.round(value) || 1) };
+        return { ...l, [field]: Math.max(0, Number(value) || 0) };
       })
     );
   };
@@ -206,6 +219,11 @@ export default function POSPage() {
       toast.error(`"${overStock.name}" exceeds available stock.`);
       return;
     }
+    const overDiscounted = lines.find((l) => (Number(l.discount) || 0) > l.quantity * l.unitPrice);
+    if (overDiscounted) {
+      toast.error(`Discount on "${overDiscounted.name}" cannot exceed its line total.`);
+      return;
+    }
     if (needsAccount) {
       toast.error('Please select a payment account for the amount being paid.');
       return;
@@ -216,8 +234,8 @@ export default function POSPage() {
     try {
       const payload = {
         customerId: customer.id,
-        items: lines.map((l) => ({ itemId: l.itemId, quantity: l.quantity })),
-        discount: discountNum,
+        items: lines.map((l) => ({ itemId: l.itemId, quantity: l.quantity, unitPrice: l.unitPrice, costPrice: l.costPrice, discount: l.discount || 0 })),
+        discount: Number(discount) || 0,
         paidAmount: paidNum,
         paymentAccountId,
       };
@@ -280,7 +298,7 @@ export default function POSPage() {
         <fieldset disabled={submitting || !!quotationId}><SellerItemsGrid
           lines={lines}
           onAddLine={handleAddLine}
-          onQuantityChange={handleQuantityChange}
+          onLineChange={handleLineChange}
           onRemoveLine={handleRemove}
           disabled={submitting}
           focusTrigger={customer?.id}
@@ -293,8 +311,14 @@ export default function POSPage() {
             <span>Subtotal</span>
             <span className="font-medium tabular-nums text-slate-800">{formatCurrency(subtotal)}</span>
           </div>
+          {lineDiscountTotal > 0 && (
+            <div className="flex justify-between text-slate-500">
+              <span>Line Discounts</span>
+              <span className="tabular-nums">{formatCurrency(lineDiscountTotal)}</span>
+            </div>
+          )}
           <div className="flex items-center justify-between">
-            <Label>Discount</Label>
+            <Label>Additional Discount</Label>
             <Input
               type="number"
               min="0"
