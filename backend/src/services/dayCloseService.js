@@ -40,6 +40,7 @@ export async function validateDraftsForClose(drafts) {
     const expectedTotal = sale.subtotalCents - sale.discountCents;
     if (expectedTotal !== sale.totalCents) issues.push('Invoice total does not match subtotal minus discount.');
     if (sale.paidAmountCents > sale.totalCents) issues.push('Paid amount exceeds the invoice total.');
+    if (sale.paidAmountCents + sale.walletAmountCents > sale.totalCents) issues.push('Paid amount plus wallet amount exceeds the invoice total.');
     if (issues.length > 0) {
       problems.push({ saleId: sale._id, receiptNumber: sale.receiptNumber, issues });
     }
@@ -114,7 +115,10 @@ export async function closeDay({ user } = {}) {
       // 2. Post customer debt/payment (deferred until now on purpose).
       const customer = await Customer.findById(sale.customer).session(session);
       const previousBalanceCents = customer.balanceCents;
-      const balanceAddedCents = sale.totalCents - sale.paidAmountCents;
+      // Wallet credit was already debited immediately at Draft creation/edit
+      // (see saleService.debitWallet) -- it reduces what's owed here exactly
+      // like paidAmountCents does, but never posts a new Account receipt.
+      const balanceAddedCents = sale.totalCents - sale.paidAmountCents - sale.walletAmountCents;
 
       customer.balanceCents += balanceAddedCents;
       customer.totalPurchasedCents += sale.totalCents;

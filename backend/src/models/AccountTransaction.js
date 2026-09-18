@@ -16,7 +16,7 @@ const accountTransactionSchema = new mongoose.Schema(
       required: true,
     },
     amountCents: { type: Number, required: true, min: 0 },
-    referenceType: { type: String, enum: ['Sale', 'Purchase', 'Payment', 'Manual'], default: 'Manual' },
+    referenceType: { type: String, enum: ['Sale', 'Purchase', 'Payment', 'CustomerWalletTransaction', 'Manual'], default: 'Manual' },
     referenceId: { type: mongoose.Schema.Types.ObjectId, default: null },
     description: { type: String, default: '' },
     balanceBeforeCents: { type: Number, default: null },

@@ -2,11 +2,65 @@ import Sale from '../models/Sale.js';
 import Customer from '../models/Customer.js';
 import InventoryItem from '../models/InventoryItem.js';
 import Account from '../models/Account.js';
+import CustomerWalletTransaction from '../models/CustomerWalletTransaction.js';
 import { nextSequence } from '../models/Counter.js';
 import { ApiError } from '../utils/ApiError.js';
 import { toCents } from '../utils/money.js';
 import { reserveStock } from './stockService.js';
 import { createPendingTransaction } from './accountService.js';
+
+// Debits the customer's wallet immediately (Draft creation/edit), recording
+// a SALE_PAYMENT wallet transaction. Never touches any Account -- that cash
+// already arrived at deposit time. Throws if it would go negative.
+export async function debitWallet(customer, amountCents, sale, session, createdBy) {
+  if (amountCents <= 0) return;
+  if (amountCents > customer.walletBalanceCents) {
+    throw new ApiError(400, `Wallet balance (${(customer.walletBalanceCents / 100).toFixed(2)}) is less than the requested wallet payment.`);
+  }
+  const balanceBeforeCents = customer.walletBalanceCents;
+  customer.walletBalanceCents -= amountCents;
+  await customer.save({ session });
+  await CustomerWalletTransaction.create(
+    [
+      {
+        customer: customer._id,
+        type: 'SALE_PAYMENT',
+        amountCents: -amountCents,
+        sale: sale._id,
+        description: `Applied to sale ${sale.receiptNumber}`,
+        balanceBeforeCents,
+        balanceAfterCents: customer.walletBalanceCents,
+        createdBy: createdBy?._id || createdBy || null,
+      },
+    ],
+    { session }
+  );
+}
+
+// Restores a previously-debited wallet amount -- used when a Draft sale
+// that used wallet credit is edited (before re-debiting the new amount) or
+// cancelled outright.
+export async function restoreWallet(customer, amountCents, sale, session, createdBy) {
+  if (amountCents <= 0) return;
+  const balanceBeforeCents = customer.walletBalanceCents;
+  customer.walletBalanceCents += amountCents;
+  await customer.save({ session });
+  await CustomerWalletTransaction.create(
+    [
+      {
+        customer: customer._id,
+        type: 'REFUND',
+        amountCents,
+        sale: sale._id,
+        description: `Restored from sale ${sale.receiptNumber}`,
+        balanceBeforeCents,
+        balanceAfterCents: customer.walletBalanceCents,
+        createdBy: createdBy?._id || createdBy || null,
+      },
+    ],
+    { session }
+  );
+}
 
 async function generateReceiptNumber(session) {
   const seq = await nextSequence('sale', session);
@@ -58,9 +112,12 @@ export function resolveLinePricing(line, item, quotedUnitPriceCents) {
 
 // Authoritative draft creation, shared by POS and quotation conversion.
 export async function createSaleDraft(payload, user, session, { quotedPrices, quotationId } = {}) {
-  const { customerId, items, discount = 0, paidAmount = 0, paymentAccountId } = payload;
+  const { customerId, items, discount = 0, paidAmount = 0, walletAmount = 0, paymentAccountId } = payload;
   if (!customerId) throw new ApiError(400, 'Please select or create a customer before completing the sale.');
   validateSaleItems({ items, discount, paidAmount });
+  if (!Number.isFinite(Number(walletAmount)) || !Number.isSafeInteger(toCents(walletAmount)) || Number(walletAmount) < 0) {
+    throw new ApiError(400, 'Wallet amount cannot be negative.');
+  }
 
 
     const customer = await Customer.findById(customerId).session(session);
@@ -112,7 +169,13 @@ export async function createSaleDraft(payload, user, session, { quotedPrices, qu
     const discountCents = Math.min(toCents(discount) + lineDiscountTotalCents, subtotalCents);
     const totalCents = subtotalCents - discountCents;
     let paidAmountCents = toCents(paidAmount);
-    if (paidAmountCents > totalCents) paidAmountCents = totalCents;
+    let walletAmountCents = toCents(walletAmount);
+    if (paidAmountCents + walletAmountCents > totalCents) {
+      throw new ApiError(400, 'Amount paid plus wallet amount cannot exceed the invoice total.');
+    }
+    if (walletAmountCents > customer.walletBalanceCents) {
+      throw new ApiError(400, `Wallet balance (${(customer.walletBalanceCents / 100).toFixed(2)}) is less than the requested wallet payment.`);
+    }
 
     const receiptNumber = await generateReceiptNumber(session);
 
@@ -128,8 +191,9 @@ export async function createSaleDraft(payload, user, session, { quotedPrices, qu
           discountCents,
           totalCents,
           paidAmountCents,
+          walletAmountCents,
           paymentAccount: account?._id || null,
-          balanceAddedCents: totalCents - paidAmountCents,
+          balanceAddedCents: totalCents - paidAmountCents - walletAmountCents,
           outstandingCents: 0, // not posted until CONFIRMED
           costOfGoodsCents: 0,
           profitCents: 0,
@@ -140,6 +204,10 @@ export async function createSaleDraft(payload, user, session, { quotedPrices, qu
       ],
       { session }
     );
+
+    if (walletAmountCents > 0) {
+      await debitWallet(customer, walletAmountCents, sale, session, user);
+    }
 
     if (paidAmountCents > 0 && account) {
       const txn = await createPendingTransaction(

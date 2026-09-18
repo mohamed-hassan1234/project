@@ -11,6 +11,8 @@ import {
   getCustomerDebt,
   payCustomerDebt,
   getCustomerStatement,
+  depositToWallet,
+  getWalletHistory,
 } from '../controllers/customerController.js';
 
 const router = Router();
@@ -26,5 +28,7 @@ router.get('/:id/history', getCustomerHistory);
 router.get('/:id/statement', getCustomerStatement);
 router.get('/:id/debt', getCustomerDebt);
 router.post('/:id/payments', payCustomerDebt);
+router.post('/:id/wallet/deposit', depositToWallet);
+router.get('/:id/wallet/history', getWalletHistory);
 
 export default router;

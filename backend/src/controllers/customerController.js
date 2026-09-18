@@ -5,6 +5,7 @@ import { postImmediateTransaction } from '../services/accountService.js';
 import Sale from '../models/Sale.js';
 import Payment from '../models/Payment.js';
 import CustomerLedger from '../models/CustomerLedger.js';
+import CustomerWalletTransaction from '../models/CustomerWalletTransaction.js';
 import { nextSequence } from '../models/Counter.js';
 import { ApiError } from '../utils/ApiError.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
@@ -21,6 +22,7 @@ function toDTO(c) {
     address: c.address,
     notes: c.notes,
     balance: fromCents(c.balanceCents),
+    walletBalance: fromCents(c.walletBalanceCents),
     totalPurchased: fromCents(c.totalPurchasedCents),
     totalPaid: fromCents(c.totalPaidCents),
     createdAt: c.createdAt,
@@ -415,6 +417,112 @@ export const payCustomerDebt = asyncHandler(async (req, res) => {
     success: true,
     data: { customer: toDTO(result.customer), paymentId: result.payment._id, receiptNumber: result.payment.receiptNumber },
   });
+});
+
+function walletTxnToDTO(t) {
+  return {
+    id: t._id,
+    type: t.type,
+    amount: fromCents(t.amountCents),
+    account: t.account?._id || t.account,
+    accountName: t.account?.name || '',
+    sale: t.sale?._id || t.sale,
+    saleReceiptNumber: t.sale?.receiptNumber || '',
+    note: t.note,
+    balanceBefore: fromCents(t.balanceBeforeCents),
+    balanceAfter: fromCents(t.balanceAfterCents),
+    createdBy: t.createdBy,
+    createdAt: t.createdAt,
+  };
+}
+
+// POST /api/customers/:id/wallet/deposit -- the customer hands over cash
+// now (it enters the selected Account, exactly like any other cash
+// receipt) in exchange for prepaid store credit. Both sides of this must
+// be created together: the Account ledger entry (money in) and the
+// Customer's wallet ledger entry (credit in).
+export const depositToWallet = asyncHandler(async (req, res) => {
+  const amount = Number(req.body.amount);
+  if (!Number.isFinite(amount) || amount <= 0 || !Number.isSafeInteger(toCents(amount))) throw new ApiError(400, 'Enter a valid deposit amount.');
+  if (!req.body.paymentAccountId) throw new ApiError(400, 'Please select an account for this deposit.');
+  const amountCents = toCents(amount);
+
+  const result = await runInTransaction(async (session) => {
+    const customer = await Customer.findById(req.params.id).session(session);
+    if (!customer) throw new ApiError(404, 'Customer not found.');
+    const account = await Account.findById(req.body.paymentAccountId).session(session);
+    if (!account || !account.isActive) throw new ApiError(400, 'Selected payment account is not available.');
+
+    const previousBalanceCents = customer.walletBalanceCents;
+    customer.walletBalanceCents += amountCents;
+    await customer.save({ session });
+
+    const txn = await postImmediateTransaction(
+      {
+        account,
+        direction: 'IN',
+        type: 'DEPOSIT',
+        amountCents,
+        referenceType: 'CustomerWalletTransaction',
+        referenceId: customer._id,
+        description: `Wallet deposit for ${customer.name}`,
+        createdBy: req.user,
+      },
+      session
+    );
+
+    const [walletTxn] = await CustomerWalletTransaction.create(
+      [
+        {
+          customer: customer._id,
+          type: 'DEPOSIT',
+          amountCents,
+          account: account._id,
+          accountTransaction: txn?._id || null,
+          note: req.body.note || '',
+          balanceBeforeCents: previousBalanceCents,
+          balanceAfterCents: customer.walletBalanceCents,
+          createdBy: req.user?._id,
+        },
+      ],
+      { session }
+    );
+
+    return { customer, walletTxn };
+  });
+
+  await logAudit({
+    user: req.user,
+    action: 'customer.wallet.deposit',
+    entityType: 'Customer',
+    entityId: result.customer._id,
+    details: { amount },
+  });
+
+  res.status(201).json({ success: true, data: { customer: toDTO(result.customer), transaction: walletTxnToDTO(result.walletTxn) } });
+});
+
+// GET /api/customers/:id/wallet/history?q=
+export const getWalletHistory = asyncHandler(async (req, res) => {
+  const customer = await Customer.findById(req.params.id);
+  if (!customer) throw new ApiError(404, 'Customer not found.');
+  const q = String(req.query.q || '').trim();
+  const filter = { customer: customer._id };
+  let transactions = await CustomerWalletTransaction.find(filter)
+    .populate('account', 'name')
+    .populate('sale', 'receiptNumber')
+    .sort({ createdAt: -1 });
+  if (q) {
+    const needle = q.toLowerCase();
+    transactions = transactions.filter(
+      (t) =>
+        t.type.toLowerCase().includes(needle) ||
+        (t.note || '').toLowerCase().includes(needle) ||
+        (t.sale?.receiptNumber || '').toLowerCase().includes(needle) ||
+        (t.account?.name || '').toLowerCase().includes(needle)
+    );
+  }
+  res.json({ success: true, data: { walletBalance: fromCents(customer.walletBalanceCents), transactions: transactions.map(walletTxnToDTO) } });
 });
 
 // GET /api/customers/:id/statement?from=&to= -- ONE consolidated document:

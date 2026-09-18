@@ -60,6 +60,13 @@ const saleReturnSchema = new mongoose.Schema(
     debtReducedCents: { type: Number, required: true, default: 0 }, // portion applied against still-unpaid balance
     refundCents: { type: Number, required: true, default: 0 }, // portion refunded out of the payment account (already paid)
     reason: { type: String, default: '' },
+    // Snapshots taken immediately after this specific return was applied --
+    // for the Return Receipt to show the balances as they stood at that
+    // moment, never recalculated from today's (possibly different) figures
+    // if further returns/payments happened on this invoice/customer since.
+    // Optional/null on returns recorded before this field existed.
+    invoiceBalanceAfterCents: { type: Number, default: null },
+    customerBalanceAfterCents: { type: Number, default: null },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   },
   { timestamps: true }
@@ -75,10 +82,15 @@ const saleSchema = new mongoose.Schema(
     subtotalCents: { type: Number, required: true, default: 0 },
     discountCents: { type: Number, required: true, default: 0 },
     totalCents: { type: Number, required: true, default: 0 },
-    paidAmountCents: { type: Number, required: true, default: 0 }, // paid at the moment of sale
+    paidAmountCents: { type: Number, required: true, default: 0 }, // paid at the moment of sale (cash/account)
+    // Applied from the customer's prepaid wallet credit. Debited from
+    // Customer.walletBalanceCents immediately at Draft creation/edit (see
+    // saleService.createSaleDraft) -- never posts a new Account receipt,
+    // since that cash already entered an Account at deposit time.
+    walletAmountCents: { type: Number, default: 0, min: 0 },
     paymentAccount: { type: mongoose.Schema.Types.ObjectId, ref: 'Account', default: null },
     accountTransaction: { type: mongoose.Schema.Types.ObjectId, ref: 'AccountTransaction', default: null },
-    balanceAddedCents: { type: Number, required: true, default: 0 }, // credit created by this sale (totalCents - paidAmountCents)
+    balanceAddedCents: { type: Number, required: true, default: 0 }, // credit created by this sale (totalCents - paidAmountCents - walletAmountCents)
     outstandingCents: { type: Number, required: true, default: 0 }, // remaining unpaid on THIS invoice (decreases as debt payments are allocated to it)
     costOfGoodsCents: { type: Number, required: true, default: 0 },
     profitCents: { type: Number, required: true, default: 0 },

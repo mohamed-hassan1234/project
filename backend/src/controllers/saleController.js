@@ -1,4 +1,4 @@
-import { createSaleDraft, validateSaleItems, resolveLinePricing } from '../services/saleService.js';
+import { createSaleDraft, validateSaleItems, resolveLinePricing, debitWallet, restoreWallet } from '../services/saleService.js';
 import Sale from '../models/Sale.js';
 import Customer from '../models/Customer.js';
 import InventoryItem from '../models/InventoryItem.js';
@@ -44,6 +44,7 @@ function toDTO(sale) {
     discount: fromCents(sale.discountCents),
     total: fromCents(sale.totalCents),
     paidAmount: fromCents(sale.paidAmountCents),
+    walletAmount: fromCents(sale.walletAmountCents),
     paymentAccount: sale.paymentAccount?._id || sale.paymentAccount,
     balanceAdded: fromCents(sale.balanceAddedCents),
     outstanding: fromCents(sale.outstandingCents),
@@ -92,8 +93,11 @@ export const createSale = asyncHandler(async (req, res) => {
 // discount, paid amount and payment account can all change. Reservations
 // and the pending account receipt are recomputed from scratch each time.
 export const updateSale = asyncHandler(async (req, res) => {
-  const { items, discount = 0, paidAmount = 0, paymentAccountId } = req.body;
+  const { items, discount = 0, paidAmount = 0, walletAmount = 0, paymentAccountId } = req.body;
   validateSaleItems({ items, discount, paidAmount });
+  if (!Number.isFinite(Number(walletAmount)) || !Number.isSafeInteger(toCents(walletAmount)) || Number(walletAmount) < 0) {
+    throw new ApiError(400, 'Wallet amount cannot be negative.');
+  }
 
   const result = await runInTransaction(async (session) => {
     const sale = await Sale.findById(req.params.id).session(session);
@@ -123,6 +127,13 @@ export const updateSale = asyncHandler(async (req, res) => {
     if (sale.accountTransaction) {
       await reverseTransaction(sale.accountTransaction, session);
       sale.accountTransaction = null;
+    }
+
+    // Restore any previously-applied wallet credit before re-validating and
+    // re-applying the (possibly different) new amount below.
+    const customer = await Customer.findById(sale.customer).session(session);
+    if (customer && sale.walletAmountCents > 0) {
+      await restoreWallet(customer, sale.walletAmountCents, sale, session, req.user);
     }
 
     const saleItems = [];
@@ -155,15 +166,26 @@ export const updateSale = asyncHandler(async (req, res) => {
     const discountCents = Math.min(toCents(discount) + lineDiscountTotalCents, subtotalCents);
     const totalCents = subtotalCents - discountCents;
     let paidAmountCents = toCents(paidAmount);
-    if (paidAmountCents > totalCents) paidAmountCents = totalCents;
+    const walletAmountCents = toCents(walletAmount);
+    if (paidAmountCents + walletAmountCents > totalCents) {
+      throw new ApiError(400, 'Amount paid plus wallet amount cannot exceed the invoice total.');
+    }
+    if (customer && walletAmountCents > customer.walletBalanceCents) {
+      throw new ApiError(400, `Wallet balance (${(customer.walletBalanceCents / 100).toFixed(2)}) is less than the requested wallet payment.`);
+    }
 
     sale.items = saleItems;
     sale.subtotalCents = subtotalCents;
     sale.discountCents = discountCents;
     sale.totalCents = totalCents;
     sale.paidAmountCents = paidAmountCents;
+    sale.walletAmountCents = walletAmountCents;
     sale.paymentAccount = account?._id || null;
-    sale.balanceAddedCents = totalCents - paidAmountCents;
+    sale.balanceAddedCents = totalCents - paidAmountCents - walletAmountCents;
+
+    if (customer && walletAmountCents > 0) {
+      await debitWallet(customer, walletAmountCents, sale, session, req.user);
+    }
 
     if (paidAmountCents > 0 && account) {
       const txn = await createPendingTransaction(
@@ -215,6 +237,10 @@ export const cancelSale = asyncHandler(async (req, res) => {
     }
     if (sale.accountTransaction) {
       await reverseTransaction(sale.accountTransaction, session);
+    }
+    if (sale.walletAmountCents > 0) {
+      const customer = await Customer.findById(sale.customer).session(session);
+      if (customer) await restoreWallet(customer, sale.walletAmountCents, sale, session, req.user);
     }
 
     sale.status = 'CANCELLED';
@@ -370,6 +396,12 @@ export const reverseSale = asyncHandler(async (req, res) => {
           session
         );
       }
+    }
+
+    // The sale is being fully undone -- give back whatever wallet credit it
+    // consumed, exactly as a Draft cancellation already does.
+    if (sale.walletAmountCents > 0 && customer) {
+      await restoreWallet(customer, sale.walletAmountCents, sale, session, req.user);
     }
 
     sale.status = 'CANCELLED';

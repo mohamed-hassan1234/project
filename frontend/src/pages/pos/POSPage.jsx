@@ -38,6 +38,7 @@ export default function POSPage() {
   const [lines, setLines] = useState(() => (restored?.lines || []).map((l) => ({ costPrice: 0, discount: 0, ...l })));
   const [discount, setDiscount] = useState(restored?.discount ?? '0');
   const [paidAmount, setPaidAmount] = useState(restored?.paidAmount ?? '');
+  const [walletAmount, setWalletAmount] = useState(restored?.walletAmount ?? '');
   const [paymentAccountId, setPaymentAccountId] = useState(restored?.paymentAccountId || null);
   const [submitting, setSubmitting] = useState(false);
   const [loadingDraft, setLoadingDraft] = useState(false);
@@ -75,6 +76,7 @@ export default function POSPage() {
         setEditReceiptNumber(sale.receiptNumber);
         setDiscount(String(sale.discount || 0));
         setPaidAmount(sale.paidAmount ? String(sale.paidAmount) : '');
+        setWalletAmount(sale.walletAmount ? String(sale.walletAmount) : '');
         setPaymentAccountId(sale.paymentAccount || null);
 
         // Since editing releases this draft's reservation before re-reserving,
@@ -132,17 +134,19 @@ export default function POSPage() {
   useEffect(() => {
     if (loadingDraft || (quotationId && !quotation)) return;
     if (customer || lines.length || customerQuery || enteredCustomer.name || enteredCustomer.phone || paidAmount || Number(discount)) {
-      const saved = writeDraft(storageKey, { customer, lines, discount, paidAmount, paymentAccountId, customerQuery, enteredCustomer, quotation, editReceiptNumber });
+      const saved = writeDraft(storageKey, { customer, lines, discount, paidAmount, walletAmount, paymentAccountId, customerQuery, enteredCustomer, quotation, editReceiptNumber });
       setStorageWarning(!saved);
     } else clearDraft(storageKey);
-  }, [storageKey, customer, lines, discount, paidAmount, paymentAccountId, customerQuery, enteredCustomer, quotation, editReceiptNumber, loadingDraft]);
+  }, [storageKey, customer, lines, discount, paidAmount, walletAmount, paymentAccountId, customerQuery, enteredCustomer, quotation, editReceiptNumber, loadingDraft]);
 
   const subtotal = useMemo(() => lines.reduce((sum, l) => sum + l.unitPrice * l.quantity, 0), [lines]);
   const lineDiscountTotal = useMemo(() => lines.reduce((sum, l) => sum + (Number(l.discount) || 0), 0), [lines]);
   const discountNum = Math.min((Number(discount) || 0) + lineDiscountTotal, subtotal);
   const total = Math.max(0, subtotal - discountNum);
-  const paidNum = Math.min(Number(paidAmount) || 0, total);
-  const remaining = Math.max(0, total - paidNum);
+  const walletAvailable = customer?.walletBalance || 0;
+  const walletNum = Math.min(Number(walletAmount) || 0, total, walletAvailable);
+  const paidNum = Math.min(Number(paidAmount) || 0, Math.max(0, total - walletNum));
+  const remaining = Math.max(0, total - paidNum - walletNum);
   const hasOverStock = lines.some((l) => l.quantity > l.available || l.quantity <= 0);
   const hasInvalidDiscount = lines.some((l) => (Number(l.discount) || 0) > l.quantity * l.unitPrice);
   const needsAccount = paidNum > 0 && !paymentAccountId;
@@ -197,6 +201,7 @@ export default function POSPage() {
     setLines([]);
     setDiscount('0');
     setPaidAmount('');
+    setWalletAmount('');
     setPaymentAccountId(null);
     setEditReceiptNumber('');
     setCustomerQuery('');
@@ -237,6 +242,7 @@ export default function POSPage() {
         items: lines.map((l) => ({ itemId: l.itemId, quantity: l.quantity, unitPrice: l.unitPrice, costPrice: l.costPrice, discount: l.discount || 0 })),
         discount: Number(discount) || 0,
         paidAmount: paidNum,
+        walletAmount: walletNum,
         paymentAccountId,
       };
       let saleId;
@@ -291,7 +297,7 @@ export default function POSPage() {
       )}
 
       <Card dense>
-        <fieldset disabled={submitting || !!quotationId}><CustomerSearchBox searchValue={customerQuery} onSearchChange={setCustomerQuery} enteredCustomer={enteredCustomer} onEnteredCustomerChange={setEnteredCustomer} activeCustomer={customer} onSelect={setCustomer} onClear={() => setCustomer(null)} cartTotal={total} paidAmount={paidNum} /></fieldset>
+        <fieldset disabled={submitting || !!quotationId}><CustomerSearchBox searchValue={customerQuery} onSearchChange={setCustomerQuery} enteredCustomer={enteredCustomer} onEnteredCustomerChange={setEnteredCustomer} activeCustomer={customer} onSelect={setCustomer} onClear={() => { setCustomer(null); setWalletAmount(''); }} cartTotal={total} paidAmount={paidNum} walletAmount={walletNum} /></fieldset>
       </Card>
 
       <Card dense title="Sale Items">
@@ -333,6 +339,22 @@ export default function POSPage() {
             <span>Grand Total</span>
             <span className="tabular-nums">{formatCurrency(total)}</span>
           </div>
+
+          {customer && walletAvailable > 0 && (
+            <div className="flex items-center justify-between pt-1">
+              <Label>Pay from Wallet (available {formatCurrency(walletAvailable)})</Label>
+              <Input
+                type="number"
+                min="0"
+                step="0.01"
+                placeholder="0.00"
+                value={walletAmount}
+                onChange={(e) => setWalletAmount(e.target.value)}
+                className="w-28 text-right tabular-nums"
+                disabled={submitting || !!quotationId}
+              />
+            </div>
+          )}
 
           <div className="grid grid-cols-1 gap-3 pt-1.5 sm:grid-cols-2">
             <div>

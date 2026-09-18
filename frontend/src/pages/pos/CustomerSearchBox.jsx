@@ -10,7 +10,7 @@ import Button from '../../components/ui/Button.jsx';
 // The core POS UX requirement: the seller TYPES a customer name (never
 // browses a dropdown). Matches appear live; if none match, a "Create New
 // Customer" action lets the seller add one without leaving the sale.
-export default function CustomerSearchBox({ activeCustomer, onSelect, onClear, cartTotal = 0, paidAmount = 0, searchValue, onSearchChange, enteredCustomer, onEnteredCustomerChange }) {
+export default function CustomerSearchBox({ activeCustomer, onSelect, onClear, cartTotal = 0, paidAmount = 0, walletAmount = 0, searchValue, onSearchChange, enteredCustomer, onEnteredCustomerChange }) {
   const toast = useToast();
   const [localQuery, setLocalQuery] = useState('');
   const query = searchValue ?? localQuery;
@@ -82,7 +82,7 @@ export default function CustomerSearchBox({ activeCustomer, onSelect, onClear, c
 
   if (activeCustomer) {
     const previousDebt = activeCustomer.balance;
-    const potentialNewBalance = previousDebt + Math.max(0, cartTotal - paidAmount);
+    const potentialNewBalance = previousDebt + Math.max(0, cartTotal - paidAmount - walletAmount);
     const hasPreviousDebt = previousDebt > 0;
 
     return (
@@ -119,14 +119,18 @@ export default function CustomerSearchBox({ activeCustomer, onSelect, onClear, c
             </p>
           </div>
           <div className="rounded-lg bg-white px-3 py-2">
+            <p className="text-xs text-slate-400">Wallet Available</p>
+            <p className="text-base font-bold text-indigo-600">{formatCurrency(activeCustomer.walletBalance || 0)}</p>
+          </div>
+          <div className="rounded-lg bg-white px-3 py-2">
             <p className="text-xs text-slate-400">Current Cart</p>
             <p className="text-base font-bold text-slate-800">{formatCurrency(cartTotal)}</p>
           </div>
           <div className="rounded-lg bg-white px-3 py-2">
             <p className="text-xs text-slate-400">Current Payment</p>
-            <p className="text-base font-bold text-slate-800">{formatCurrency(paidAmount)}</p>
+            <p className="text-base font-bold text-slate-800">{formatCurrency(paidAmount + walletAmount)}</p>
           </div>
-          <div className="rounded-lg bg-white px-3 py-2">
+          <div className="col-span-2 rounded-lg bg-white px-3 py-2">
             <p className="text-xs text-slate-400">Potential New Balance</p>
             <p className={`text-base font-bold ${potentialNewBalance > 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
               {formatCurrency(potentialNewBalance)}
