@@ -1,6 +1,6 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import User from '../models/User.js';
+import User, { PERMISSION_MODULES } from '../models/User.js';
 import { ApiError } from '../utils/ApiError.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 
@@ -16,6 +16,10 @@ function sanitize(user) {
     username: user.username,
     name: user.name,
     role: user.role,
+    // An admin always has every module regardless of what's stored --
+    // the frontend never needs its own "is admin" special-casing to
+    // decide what to show.
+    permissions: user.role === 'admin' ? PERMISSION_MODULES : user.permissions || [],
   };
 }
 

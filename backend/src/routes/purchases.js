@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { requireAuth, requireRole } from '../middleware/auth.js';
+import { requireAuth, requireRole, requirePermission } from '../middleware/auth.js';
 import {
   createPurchase,
   listPurchases,
@@ -12,6 +12,7 @@ import {
 
 const router = Router();
 router.use(requireAuth);
+router.use(requirePermission('purchases'));
 
 router.get('/', listPurchases);
 router.post('/', createPurchase);

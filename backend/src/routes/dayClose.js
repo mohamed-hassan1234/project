@@ -1,9 +1,10 @@
 import { Router } from 'express';
-import { requireAuth, requireRole } from '../middleware/auth.js';
+import { requireAuth, requireRole, requirePermission } from '../middleware/auth.js';
 import { getPreview, confirmClose, listHistory } from '../controllers/dayCloseController.js';
 
 const router = Router();
 router.use(requireAuth);
+router.use(requirePermission('pos'));
 
 router.get('/preview', getPreview);
 router.get('/history', listHistory);

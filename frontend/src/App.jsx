@@ -6,6 +6,7 @@ import QuotationDetailPage from './pages/quotations/QuotationDetailPage.jsx';
 import { AuthProvider } from './context/AuthContext.jsx';
 import { ToastProvider } from './context/ToastContext.jsx';
 import ProtectedRoute from './components/ProtectedRoute.jsx';
+import RequirePermission from './components/RequirePermission.jsx';
 import AppLayout from './layouts/AppLayout.jsx';
 
 import Login from './pages/Login.jsx';
@@ -29,6 +30,7 @@ import ReceiptPage from './pages/receipt/ReceiptPage.jsx';
 import PaymentReceiptPage from './pages/receipt/PaymentReceiptPage.jsx';
 import PurchaseReceiptPage from './pages/receipt/PurchaseReceiptPage.jsx';
 import ReturnReceiptPage from './pages/receipt/ReturnReceiptPage.jsx';
+import UsersPage from './pages/users/UsersPage.jsx';
 import NotFound from './pages/NotFound.jsx';
 
 function POSWorkspace() { const location = useLocation(); return <POSPage key={location.search} />; }
@@ -49,30 +51,31 @@ export default function App() {
               }
             >
               <Route path="/dashboard" element={<Dashboard />} />
-              <Route path="/inventory" element={<InventoryPage />} />
-              <Route path="/inventory/:id/print" element={<InventoryPrintPage />} />
-              <Route path="/categories" element={<CategoriesPage />} />
-              <Route path="/pos" element={<SalesInvoicePage />} />
-              <Route path="/pos/new" element={<POSWorkspace />} />
-              <Route path="/quotations" element={<QuotationsPage />} />
-              <Route path="/quotations/new" element={<QuotationDetailPage key="new" />} />
-              <Route path="/quotations/:id" element={<QuotationDetailPage />} />
-              <Route path="/pos/close-day" element={<CloseDayPage />} />
-              <Route path="/stock" element={<StockPage />} />
-              <Route path="/purchases" element={<PurchasesPage />} />
-              <Route path="/purchases/:id" element={<PurchaseDetailPage />} />
-              <Route path="/purchases/:id/receipt" element={<PurchaseReceiptPage />} />
-              <Route path="/customers" element={<CustomersPage />} />
-              <Route path="/customers/:id" element={<CustomerDetailPage />} />
-              <Route path="/customers/:id/statement" element={<CustomerStatementPage />} />
-              <Route path="/suppliers" element={<SuppliersPage />} />
-              <Route path="/suppliers/:id" element={<SupplierDetailPage />} />
-              <Route path="/supplier-invoices" element={<SupplierInvoicesPage />} />
-              <Route path="/accounts" element={<AccountsPage />} />
-              <Route path="/reports" element={<ReportsPage />} />
-              <Route path="/receipt/:id" element={<ReceiptPage />} />
-              <Route path="/receipt/:id/return/:index" element={<ReturnReceiptPage />} />
-              <Route path="/payment-receipt/:id" element={<PaymentReceiptPage />} />
+              <Route path="/inventory" element={<RequirePermission module="inventory"><InventoryPage /></RequirePermission>} />
+              <Route path="/inventory/:id/print" element={<RequirePermission module="inventory"><InventoryPrintPage /></RequirePermission>} />
+              <Route path="/categories" element={<RequirePermission module="categories"><CategoriesPage /></RequirePermission>} />
+              <Route path="/pos" element={<RequirePermission module="pos"><SalesInvoicePage /></RequirePermission>} />
+              <Route path="/pos/new" element={<RequirePermission module="pos"><POSWorkspace /></RequirePermission>} />
+              <Route path="/quotations" element={<RequirePermission module="quotations"><QuotationsPage /></RequirePermission>} />
+              <Route path="/quotations/new" element={<RequirePermission module="quotations"><QuotationDetailPage key="new" /></RequirePermission>} />
+              <Route path="/quotations/:id" element={<RequirePermission module="quotations"><QuotationDetailPage /></RequirePermission>} />
+              <Route path="/pos/close-day" element={<RequirePermission module="pos"><CloseDayPage /></RequirePermission>} />
+              <Route path="/stock" element={<RequirePermission module="stock"><StockPage /></RequirePermission>} />
+              <Route path="/purchases" element={<RequirePermission module="purchases"><PurchasesPage /></RequirePermission>} />
+              <Route path="/purchases/:id" element={<RequirePermission module="purchases"><PurchaseDetailPage /></RequirePermission>} />
+              <Route path="/purchases/:id/receipt" element={<RequirePermission module="purchases"><PurchaseReceiptPage /></RequirePermission>} />
+              <Route path="/customers" element={<RequirePermission module="customers"><CustomersPage /></RequirePermission>} />
+              <Route path="/customers/:id" element={<RequirePermission module="customers"><CustomerDetailPage /></RequirePermission>} />
+              <Route path="/customers/:id/statement" element={<RequirePermission module="customers"><CustomerStatementPage /></RequirePermission>} />
+              <Route path="/suppliers" element={<RequirePermission module="suppliers"><SuppliersPage /></RequirePermission>} />
+              <Route path="/suppliers/:id" element={<RequirePermission module="suppliers"><SupplierDetailPage /></RequirePermission>} />
+              <Route path="/supplier-invoices" element={<RequirePermission module="supplierInvoices"><SupplierInvoicesPage /></RequirePermission>} />
+              <Route path="/accounts" element={<RequirePermission module="accounts"><AccountsPage /></RequirePermission>} />
+              <Route path="/reports" element={<RequirePermission module="reports"><ReportsPage /></RequirePermission>} />
+              <Route path="/receipt/:id" element={<RequirePermission module="pos"><ReceiptPage /></RequirePermission>} />
+              <Route path="/receipt/:id/return/:index" element={<RequirePermission module="pos"><ReturnReceiptPage /></RequirePermission>} />
+              <Route path="/payment-receipt/:id" element={<RequirePermission module="customers"><PaymentReceiptPage /></RequirePermission>} />
+              <Route path="/users" element={<RequirePermission adminOnly><UsersPage /></RequirePermission>} />
             </Route>
 
             <Route path="/" element={<Navigate to="/dashboard" replace />} />

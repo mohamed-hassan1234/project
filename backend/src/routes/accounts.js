@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { requireAuth, requireRole } from '../middleware/auth.js';
+import { requireAuth, requireRole, requirePermission } from '../middleware/auth.js';
 import {
   listAccounts,
   getAccount,
@@ -12,11 +12,17 @@ import {
 const router = Router();
 router.use(requireAuth);
 
-router.get('/report', accountsReport);
+// The account-picker surface: every payment (POS, Purchases, Wallet
+// Deposit) needs the list of accounts to choose from, regardless of
+// whether the current user has the standalone Accounts module.
 router.get('/', listAccounts);
-router.post('/', requireRole('admin', 'manager'), createAccount);
-router.get('/:id', getAccount);
-router.put('/:id', requireRole('admin', 'manager'), updateAccount);
-router.get('/:id/transactions', getAccountTransactions);
+
+// The actual Accounts module: reports, per-account detail/ledger, and
+// creating/editing accounts (already admin/manager only).
+router.get('/report', requirePermission('accounts'), accountsReport);
+router.post('/', requirePermission('accounts'), requireRole('admin', 'manager'), createAccount);
+router.get('/:id', requirePermission('accounts'), getAccount);
+router.put('/:id', requirePermission('accounts'), requireRole('admin', 'manager'), updateAccount);
+router.get('/:id/transactions', requirePermission('accounts'), getAccountTransactions);
 
 export default router;

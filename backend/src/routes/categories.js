@@ -1,9 +1,10 @@
 import { Router } from 'express';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, requirePermission } from '../middleware/auth.js';
 import { listCategories, getCategory, createCategory, updateCategory, deleteCategory } from '../controllers/categoryController.js';
 
 const router = Router();
 router.use(requireAuth);
+router.use(requirePermission('categories'));
 
 router.get('/', listCategories);
 router.post('/', createCategory);

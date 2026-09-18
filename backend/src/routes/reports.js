@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { quotationReport } from '../controllers/quotationController.js';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, requirePermission } from '../middleware/auth.js';
 import {
   salesReport,
   profitReport,
@@ -14,6 +14,7 @@ import { getCustomerHistory } from '../controllers/customerController.js';
 
 const router = Router();
 router.use(requireAuth);
+router.use(requirePermission('reports'));
 
 router.get('/sales', salesReport);
 router.get('/quotations', quotationReport);

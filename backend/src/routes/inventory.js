@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, requirePermission } from '../middleware/auth.js';
 import {
   listInventory,
   searchInventory,
@@ -13,12 +13,18 @@ import {
 const router = Router();
 router.use(requireAuth);
 
+// Shared lookup/create surface: Seller/POS (product search, editing a
+// Draft's existing lines, "+ Add New Item") and Stock both depend on this
+// regardless of whether the current user has the standalone Inventory
+// module -- gating these would break product search at the register.
 router.get('/search', searchInventory);
-router.get('/alerts/summary', getAlertsSummary);
-router.get('/', listInventory);
 router.post('/', createInventoryItem);
 router.get('/:id', getInventoryItem);
-router.put('/:id', updateInventoryItem);
-router.delete('/:id', deleteInventoryItem);
+
+// The actual Inventory module: browsing, editing, deleting, alerts.
+router.get('/alerts/summary', requirePermission('inventory'), getAlertsSummary);
+router.get('/', requirePermission('inventory'), listInventory);
+router.put('/:id', requirePermission('inventory'), updateInventoryItem);
+router.delete('/:id', requirePermission('inventory'), deleteInventoryItem);
 
 export default router;

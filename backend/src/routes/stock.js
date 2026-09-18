@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, requirePermission } from '../middleware/auth.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { ApiError } from '../utils/ApiError.js';
 import { runInTransaction } from '../utils/transaction.js';
@@ -12,6 +12,7 @@ import Supplier from '../models/Supplier.js';
 import { ensureLegacyLots } from '../services/batchService.js';
 const router = Router();
 router.use(requireAuth);
+router.use(requirePermission('stock'));
 const escapeRegex = value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 router.post('/', asyncHandler(async (req, res) => {
   const { rows, externalSerialNumber = '', supplierId = null } = req.body;

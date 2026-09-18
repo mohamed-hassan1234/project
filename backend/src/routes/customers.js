@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, requirePermission } from '../middleware/auth.js';
 import {
   listCustomers,
   searchCustomers,
@@ -18,17 +18,22 @@ import {
 const router = Router();
 router.use(requireAuth);
 
+// Shared lookup/create surface: needed by Seller/POS and Quotation (pick or
+// create a customer for a sale) regardless of whether the current user has
+// the standalone Customers module -- gating these would break that workflow.
 router.get('/search', searchCustomers);
-router.get('/', listCustomers);
 router.post('/', createCustomer);
 router.get('/:id', getCustomer);
-router.put('/:id', updateCustomer);
-router.delete('/:id', deleteCustomer);
-router.get('/:id/history', getCustomerHistory);
-router.get('/:id/statement', getCustomerStatement);
-router.get('/:id/debt', getCustomerDebt);
-router.post('/:id/payments', payCustomerDebt);
-router.post('/:id/wallet/deposit', depositToWallet);
-router.get('/:id/wallet/history', getWalletHistory);
+
+// The actual Customers module: browsing, editing, debt/wallet management.
+router.get('/', requirePermission('customers'), listCustomers);
+router.put('/:id', requirePermission('customers'), updateCustomer);
+router.delete('/:id', requirePermission('customers'), deleteCustomer);
+router.get('/:id/history', requirePermission('customers'), getCustomerHistory);
+router.get('/:id/statement', requirePermission('customers'), getCustomerStatement);
+router.get('/:id/debt', requirePermission('customers'), getCustomerDebt);
+router.post('/:id/payments', requirePermission('customers'), payCustomerDebt);
+router.post('/:id/wallet/deposit', requirePermission('customers'), depositToWallet);
+router.get('/:id/wallet/history', requirePermission('customers'), getWalletHistory);
 
 export default router;

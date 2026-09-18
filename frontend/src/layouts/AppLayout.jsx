@@ -14,24 +14,29 @@ import {
   LogOut,
   Menu,
   X,
+  UserCog,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.jsx';
+import { hasPermission } from '../constants/permissions.js';
 import { BUSINESS } from '../constants/business.js';
 import logo from '../images/logo.png';
 
+// `module: null` means always visible to any authenticated user (no
+// standalone permission gate) -- Dashboard only, per the deliberate choice
+// to leave it ungated ("if appropriate").
 const navItems = [
-  { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { to: '/stock', label: 'Stock', icon: Boxes },
-  { to: '/inventory', label: 'Inventory', icon: Boxes },
-  { to: '/categories', label: 'Categories', icon: Tag },
-  { to: '/pos', label: 'Seller / POS', icon: ShoppingCart },
-  { to: '/quotations', label: 'Quotation', icon: FileText },
-  { to: '/purchases', label: 'Purchase Invoices', icon: FileText },
-  { to: '/accounts', label: 'Accounts', icon: Wallet },
-  { to: '/customers', label: 'Customers', icon: Users },
-  { to: '/suppliers', label: 'Suppliers', icon: Building2 },
-  { to: '/supplier-invoices', label: 'Supplier Invoices', icon: Receipt },
-  { to: '/reports', label: 'Reports', icon: BarChart3 },
+  { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, module: null },
+  { to: '/stock', label: 'Stock', icon: Boxes, module: 'stock' },
+  { to: '/inventory', label: 'Inventory', icon: Boxes, module: 'inventory' },
+  { to: '/categories', label: 'Categories', icon: Tag, module: 'categories' },
+  { to: '/pos', label: 'Seller / POS', icon: ShoppingCart, module: 'pos' },
+  { to: '/quotations', label: 'Quotation', icon: FileText, module: 'quotations' },
+  { to: '/purchases', label: 'Purchase Invoices', icon: FileText, module: 'purchases' },
+  { to: '/accounts', label: 'Accounts', icon: Wallet, module: 'accounts' },
+  { to: '/customers', label: 'Customers', icon: Users, module: 'customers' },
+  { to: '/suppliers', label: 'Suppliers', icon: Building2, module: 'suppliers' },
+  { to: '/supplier-invoices', label: 'Supplier Invoices', icon: Receipt, module: 'supplierInvoices' },
+  { to: '/reports', label: 'Reports', icon: BarChart3, module: 'reports' },
 ];
 
 function SidebarContent({ onNavigate }) {
@@ -54,7 +59,10 @@ function SidebarContent({ onNavigate }) {
       </div>
 
       <nav className="flex-1 space-y-0.5 overflow-y-auto px-2.5 pt-1">
-        {navItems.map(({ to, label, icon: Icon }) => (
+        {navItems
+          .filter(({ module }) => module === null || hasPermission(user, module))
+          .concat(user?.role === 'admin' ? [{ to: '/users', label: 'Users', icon: UserCog, module: null }] : [])
+          .map(({ to, label, icon: Icon }) => (
           <NavLink
             key={to}
             to={to}

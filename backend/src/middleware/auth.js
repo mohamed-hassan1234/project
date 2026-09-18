@@ -35,3 +35,16 @@ export function requireRole(...roles) {
     next();
   };
 }
+
+// Backend enforcement of per-user module permissions -- the actual security
+// boundary. Frontend nav/route hiding is only a UX convenience; a request
+// that reaches the server is always re-checked here against the live user
+// record requireAuth just fetched, so a revoked permission takes effect on
+// this user's very next request, no re-login required.
+export function requirePermission(moduleKey) {
+  return (req, res, next) => {
+    if (!req.user) return next(new ApiError(401, 'You are not logged in. Please log in again.'));
+    if (req.user.role === 'admin' || req.user.permissions?.includes(moduleKey)) return next();
+    return next(new ApiError(403, 'You do not have permission to access this module.'));
+  };
+}

@@ -16,6 +16,17 @@ export function AuthProvider({ children }) {
     setUnauthorizedHandler(() => logout());
   }, [logout]);
 
+  const refreshUser = useCallback(() => {
+    if (!localStorage.getItem('pos_token')) return Promise.resolve(null);
+    return client
+      .get('/auth/me')
+      .then((res) => {
+        setUser(res.data.data);
+        return res.data.data;
+      })
+      .catch(() => null);
+  }, []);
+
   useEffect(() => {
     const token = localStorage.getItem('pos_token');
     if (!token) {
@@ -31,6 +42,18 @@ export function AuthProvider({ children }) {
       .finally(() => setLoading(false));
   }, []);
 
+  // Permission/role/active changes an admin makes elsewhere should take
+  // effect without forcing a re-login -- requireAuth already re-fetches the
+  // user fresh on every API call server-side, so this periodic refresh just
+  // brings the frontend's copy (nav, route guards) into line with that
+  // shortly after. Deactivation itself is enforced immediately by the next
+  // real API call regardless of this timer.
+  useEffect(() => {
+    if (!user) return;
+    const interval = setInterval(refreshUser, 60000);
+    return () => clearInterval(interval);
+  }, [user, refreshUser]);
+
   const login = async (username, password) => {
     const res = await client.post('/auth/login', { username, password });
     localStorage.setItem('pos_token', res.data.data.token);
@@ -39,7 +62,7 @@ export function AuthProvider({ children }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout }}>{children}</AuthContext.Provider>
+    <AuthContext.Provider value={{ user, loading, login, logout, refreshUser }}>{children}</AuthContext.Provider>
   );
 }
 
