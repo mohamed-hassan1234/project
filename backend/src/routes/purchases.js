@@ -5,6 +5,9 @@ import {
   listPurchases,
   getPurchase,
   voidPurchase,
+  addPurchasePayment,
+  listPurchasePayments,
+  reversePurchasePayment,
 } from '../controllers/purchaseController.js';
 
 const router = Router();
@@ -14,5 +17,8 @@ router.get('/', listPurchases);
 router.post('/', createPurchase);
 router.get('/:id', getPurchase);
 router.post('/:id/void', requireRole('admin', 'manager'), voidPurchase);
+router.get('/:id/payments', listPurchasePayments);
+router.post('/:id/payments', addPurchasePayment);
+router.post('/:id/payments/:paymentId/reverse', requireRole('admin', 'manager'), reversePurchasePayment);
 
 export default router;

@@ -1,17 +1,21 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Plus, Ban, Printer } from 'lucide-react';
+import { Plus, Ban, Printer, Search } from 'lucide-react';
 import client from '../../api/client.js';
 import { useAuth } from '../../context/AuthContext.jsx';
 import { useToast } from '../../context/ToastContext.jsx';
+import { useDebounce } from '../../hooks/useDebounce.js';
 import { formatCurrency, formatDateTime } from '../../utils/format.js';
 import PageHeader from '../../components/ui/PageHeader.jsx';
 import Button from '../../components/ui/Button.jsx';
+import { Input, Select } from '../../components/ui/Field.jsx';
 import { Table, THead, Th, TBody, Td, TableEmpty, TableLoading } from '../../components/ui/Table.jsx';
 import Pagination from '../../components/ui/Pagination.jsx';
 import Badge from '../../components/ui/Badge.jsx';
 import ConfirmDialog from '../../components/ui/ConfirmDialog.jsx';
 import PurchaseFormModal from './PurchaseFormModal.jsx';
+
+const PAYMENT_STATUS_COLOR = { Unpaid: 'slate', Partial: 'amber', Paid: 'green' };
 
 export default function PurchasesPage() {
   const toast = useToast();
@@ -20,6 +24,9 @@ export default function PurchasesPage() {
   const [pagination, setPagination] = useState({ page: 1, pages: 1, total: 0, limit: 20 });
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
+  const [q, setQ] = useState('');
+  const debouncedQ = useDebounce(q, 300);
+  const [paymentStatus, setPaymentStatus] = useState('');
   const [formOpen, setFormOpen] = useState(false);
   const [voidItem, setVoidItem] = useState(null);
   const [voiding, setVoiding] = useState(false);
@@ -27,14 +34,16 @@ export default function PurchasesPage() {
   const load = useCallback(() => {
     setLoading(true);
     client
-      .get('/purchases', { params: { page, limit: 20 } })
+      .get('/purchases', { params: { page, limit: 20, q: debouncedQ || undefined, paymentStatus: paymentStatus || undefined } })
       .then((res) => {
         setItems(res.data.data);
         setPagination(res.data.pagination);
       })
       .catch((err) => toast.error(err.friendlyMessage || 'Failed to load purchases.'))
       .finally(() => setLoading(false));
-  }, [page]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [page, debouncedQ, paymentStatus]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => setPage(1), [debouncedQ, paymentStatus]);
 
   useEffect(() => load(), [load]);
 
@@ -66,14 +75,27 @@ export default function PurchasesPage() {
         }
       />
 
+      <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div className="relative sm:col-span-2">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <Input className="pl-9" placeholder="Search by invoice number or supplier..." value={q} onChange={(e) => setQ(e.target.value)} />
+        </div>
+        <Select value={paymentStatus} onChange={(e) => setPaymentStatus(e.target.value)}>
+          <option value="">All Payment Statuses</option>
+          <option value="Unpaid">Unpaid</option>
+          <option value="Partial">Partial</option>
+          <option value="Paid">Paid</option>
+        </Select>
+      </div>
+
       <Table>
         <THead>
           <tr>
             <Th>Internal Invoice</Th>
             <Th>Supplier Invoice</Th>
             <Th>Supplier</Th>
-            <Th>Amount</Th>
-            <Th>Paid From</Th>
+            <Th>Total / Balance</Th>
+            <Th>Payment Status</Th>
             <Th>Date</Th>
             <Th>Status</Th>
             <Th className="text-right">Actions</Th>
@@ -87,14 +109,18 @@ export default function PurchasesPage() {
           ) : (
             items.map((p) => (
               <tr key={p.id} className="hover:bg-slate-50">
-                <Td className="font-medium text-slate-900">{p.purchaseNumber}</Td>
+                <Td>
+                  <Link to={`/purchases/${p.id}`} className="font-medium text-indigo-600 hover:underline">{p.purchaseNumber}</Link>
+                </Td>
                 <Td>{p.supplierInvoiceNumber || '—'}</Td>
                 <Td>{p.supplierName}</Td>
                 <Td>
                   {formatCurrency(p.totalCost)}
                   {p.balance > 0 && <div className="text-xs font-semibold text-rose-600">Owed: {formatCurrency(p.balance)}</div>}
                 </Td>
-                <Td>{p.paymentAccountName || '—'}</Td>
+                <Td>
+                  <Badge color={PAYMENT_STATUS_COLOR[p.paymentStatus]}>{p.paymentStatus}</Badge>
+                </Td>
                 <Td>{formatDateTime(p.createdAt)}</Td>
                 <Td>
                   <Badge color={p.status === 'voided' ? 'red' : 'green'}>{p.status === 'voided' ? 'Voided' : 'Completed'}</Badge>

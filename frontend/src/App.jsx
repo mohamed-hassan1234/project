@@ -16,6 +16,7 @@ import CategoriesPage from './pages/categories/CategoriesPage.jsx';
 import POSPage from './pages/pos/POSPage.jsx';
 import CloseDayPage from './pages/pos/CloseDayPage.jsx';
 import PurchasesPage from './pages/purchases/PurchasesPage.jsx';
+import PurchaseDetailPage from './pages/purchases/PurchaseDetailPage.jsx';
 import CustomersPage from './pages/customers/CustomersPage.jsx';
 import CustomerDetailPage from './pages/customers/CustomerDetailPage.jsx';
 import CustomerStatementPage from './pages/customers/CustomerStatementPage.jsx';
@@ -58,6 +59,7 @@ export default function App() {
               <Route path="/pos/close-day" element={<CloseDayPage />} />
               <Route path="/stock" element={<StockPage />} />
               <Route path="/purchases" element={<PurchasesPage />} />
+              <Route path="/purchases/:id" element={<PurchaseDetailPage />} />
               <Route path="/purchases/:id/receipt" element={<PurchaseReceiptPage />} />
               <Route path="/customers" element={<CustomersPage />} />
               <Route path="/customers/:id" element={<CustomerDetailPage />} />
