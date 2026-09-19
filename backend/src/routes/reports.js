@@ -9,6 +9,8 @@ import {
   customersReport,
   purchasesReport,
   itemProfitReport,
+  listReportableUsers,
+  userPerformanceReport,
 } from '../controllers/reportController.js';
 import { getCustomerHistory } from '../controllers/customerController.js';
 
@@ -25,5 +27,7 @@ router.get('/customers', customersReport);
 router.get('/customers/:id', getCustomerHistory);
 router.get('/purchases', purchasesReport);
 router.get('/item-profit/:itemId', itemProfitReport);
+router.get('/users', listReportableUsers);
+router.get('/user-performance', userPerformanceReport);
 
 export default router;

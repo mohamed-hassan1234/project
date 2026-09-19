@@ -39,6 +39,7 @@ const TABS = [
   { key: 'sales', label: 'Sales', title: 'Sales Report', orientation: 'portrait' },
   { key: 'profit', label: 'Profit', title: 'Profit Report', orientation: 'portrait' },
   { key: 'inventory', label: 'Inventory', title: 'Inventory Report', orientation: 'landscape' },
+  { key: 'performance', label: 'User Performance', title: 'User Performance Report', orientation: 'portrait' },
 ];
 
 export default function ReportsPage() {
@@ -50,20 +51,31 @@ export default function ReportsPage() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [drilldownItem, setDrilldownItem] = useState(null);
+  const [performanceUserId, setPerformanceUserId] = useState('');
 
   const rangeParams = from || to ? { from: from || undefined, to: to || undefined } : { range };
   const activeTab = TABS.find((t) => t.key === tab);
 
   const load = useCallback(() => {
     if (tab === 'quotations') return;
+    if (tab === 'performance' && !performanceUserId) {
+      setData(null);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
-    const params = tab === 'inventory' ? {} : rangeParams;
+    const params =
+      tab === 'inventory'
+        ? {}
+        : tab === 'performance'
+        ? { ...rangeParams, userId: performanceUserId }
+        : rangeParams;
     client
-      .get(`/reports/${tab}`, { params })
+      .get(`/reports/${tab === 'performance' ? 'user-performance' : tab}`, { params })
       .then((res) => setData({ ...res.data.data, __tab: tab }))
       .catch((err) => toast.error(err.friendlyMessage || 'Failed to load report.'))
       .finally(() => setLoading(false));
-  }, [tab, range, from, to]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [tab, range, from, to, performanceUserId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     load();
@@ -98,6 +110,10 @@ export default function ReportsPage() {
         ))}
       </div>
 
+      {tab === 'performance' && (
+        <UserPerformancePicker userId={performanceUserId} onUserChange={setPerformanceUserId} />
+      )}
+
       {showDateFilters && (
         <DateRangeFilter
           range={range}
@@ -116,7 +132,9 @@ export default function ReportsPage() {
       <div id="print-area">
         <PrintReportHeader title={activeTab.title} rangeLabel={rangeLabel} />
 
-        {!ready ? (
+        {tab === 'performance' && !performanceUserId ? (
+          <EmptyReportState message="Select a user above to view their performance report." />
+        ) : !ready ? (
           <PageSpinner />
         ) : (
           <>
@@ -125,6 +143,7 @@ export default function ReportsPage() {
               <ProfitReport data={data} onDrilldown={(itemId, name) => setDrilldownItem({ id: itemId, name })} />
             )}
             {tab === 'inventory' && <InventoryReport data={data} />}
+            {tab === 'performance' && <UserPerformanceReport data={data} />}
           </>
         )}
 
@@ -546,6 +565,124 @@ function InventoryReport({ data }) {
           <SimpleItemTable rows={data.nearExpiry} extraLabel="Expires On" extraKey="expiryDate" isDate />
         </ReportSection>
       </div>
+    </div>
+  );
+}
+
+function UserPerformancePicker({ userId, onUserChange }) {
+  const toast = useToast();
+  const [users, setUsers] = useState(null);
+
+  useEffect(() => {
+    client
+      .get('/reports/users')
+      .then((res) => setUsers(res.data.data))
+      .catch((err) => toast.error(err.friendlyMessage || 'Failed to load users.'));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <div className="mb-4 flex flex-wrap items-center gap-2 no-print">
+      <label className="text-sm font-medium text-slate-600" htmlFor="perf-user-select">
+        Select User
+      </label>
+      <select
+        id="perf-user-select"
+        value={userId}
+        onChange={(e) => onUserChange(e.target.value)}
+        className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
+      >
+        <option value="">— Choose a user —</option>
+        {(users || []).map((u) => (
+          <option key={u.id} value={u.id}>
+            {u.name} ({u.username})
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+function UserPerformanceReport({ data }) {
+  return (
+    <div className="space-y-6">
+      <ReportSection title={`Performance — ${data.user.name} (${data.user.username})`}>
+        <ReportStatRow
+          items={[
+            { label: 'Total Sales', value: formatCurrency(data.totalSales) },
+            { label: 'Invoice Count', value: data.invoiceCount },
+            { label: 'Items Sold', value: data.itemsSold },
+            { label: 'Cash Collected', value: formatCurrency(data.cashCollected), tone: 'text-emerald-600' },
+            { label: 'Wallet Collected', value: formatCurrency(data.walletCollected), tone: 'text-indigo-600' },
+            { label: 'Credit Extended', value: formatCurrency(data.creditExtended), tone: 'text-amber-600' },
+            { label: 'Average Sale Value', value: formatCurrency(data.averageSaleValue) },
+          ]}
+        />
+      </ReportSection>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <ReportSection title="Sales Over Time">
+          {data.byDay.length === 0 ? (
+            <EmptyReportState message="No confirmed sales found for this date range." />
+          ) : (
+            <ResponsiveContainer width="100%" height={240}>
+              <LineChart data={data.byDay}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                <XAxis dataKey="date" tick={{ fontSize: 11 }} tickFormatter={(d) => d.slice(5)} />
+                <YAxis tick={{ fontSize: 11 }} />
+                <Tooltip formatter={(v) => formatCurrency(v)} />
+                <Line type="monotone" dataKey="totalSales" stroke="#4f46e5" strokeWidth={2} dot={false} name="Sales" />
+              </LineChart>
+            </ResponsiveContainer>
+          )}
+        </ReportSection>
+
+        <ReportSection title="Payments Collected by Account">
+          {data.paymentByAccount.length === 0 ? (
+            <EmptyReportState message="No account payments found for this date range." />
+          ) : (
+            <ResponsiveContainer width="100%" height={220}>
+              <PieChart>
+                <Pie
+                  data={data.paymentByAccount}
+                  dataKey="amount"
+                  nameKey="account"
+                  outerRadius={80}
+                  label={(e) => `${e.account}: ${formatCurrency(e.amount)}`}
+                >
+                  {data.paymentByAccount.map((entry, i) => (
+                    <Cell key={entry.account} fill={['#4f46e5', '#0ea5e9', '#10b981', '#f59e0b', '#f43f5e', '#a855f7'][i % 6]} />
+                  ))}
+                </Pie>
+                <Tooltip formatter={(v) => formatCurrency(v)} />
+                <Legend />
+              </PieChart>
+            </ResponsiveContainer>
+          )}
+        </ReportSection>
+      </div>
+
+      <ReportSection title="Payments Collected by Account — Detail">
+        <Table>
+          <THead>
+            <tr>
+              <Th>Account</Th>
+              <Th>Amount Collected</Th>
+            </tr>
+          </THead>
+          <TBody>
+            {data.paymentByAccount.length === 0 ? (
+              <TableEmpty colSpan={2} message="No account payments found for this date range." />
+            ) : (
+              data.paymentByAccount.map((a) => (
+                <tr key={a.account}>
+                  <Td className="font-medium text-slate-900">{a.account}</Td>
+                  <Td>{formatCurrency(a.amount)}</Td>
+                </tr>
+              ))
+            )}
+          </TBody>
+        </Table>
+      </ReportSection>
     </div>
   );
 }

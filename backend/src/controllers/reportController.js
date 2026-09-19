@@ -2,9 +2,11 @@ import Sale from '../models/Sale.js';
 import Purchase from '../models/Purchase.js';
 import InventoryItem from '../models/InventoryItem.js';
 import Customer from '../models/Customer.js';
+import User from '../models/User.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { fromCents } from '../utils/money.js';
 import { resolveDateRange } from '../utils/dateRange.js';
+import { ApiError } from '../utils/ApiError.js';
 
 const NEAR_EXPIRY_DAYS = 30;
 
@@ -385,6 +387,90 @@ export const purchasesReport = asyncHandler(async (req, res) => {
       bySupplier: bySupplier.map((s) => ({ supplier: s._id, spent: fromCents(s.spent), purchases: s.purchases })),
       byProduct: byProduct.map((p) => ({ name: p._id, spent: fromCents(p.spent), quantity: p.quantity })),
       mostPurchasedItems: mostPurchased.map((p) => ({ name: p._id, quantity: p.quantity })),
+    },
+  });
+});
+
+// GET /api/reports/users -- minimal active-user list for the User
+// Performance report's "Select User" filter. Lives under /reports (gated by
+// the 'reports' module permission) rather than the admin-only /users
+// endpoint, since any reports-permitted role should be able to run this
+// report without needing full Users administration access.
+export const listReportableUsers = asyncHandler(async (req, res) => {
+  const users = await User.find({ active: true }).sort({ name: 1 }).select('name username role');
+  res.json({ success: true, data: users.map((u) => ({ id: u._id, name: u.name, username: u.username, role: u.role })) });
+});
+
+// GET /api/reports/user-performance -- per-cashier/user performance for a
+// selected date range. Always derived from CONFIRMED sales' own historical
+// fields (never today's live Account balances), so a report for last month
+// stays correct even after Close Day has since reset every Account to $0.
+export const userPerformanceReport = asyncHandler(async (req, res) => {
+  const { userId } = req.query;
+  if (!userId) throw new ApiError(400, 'Select a user.');
+
+  const user = await User.findById(userId).select('name username role');
+  if (!user) throw new ApiError(404, 'User not found.');
+
+  const { start, end } = resolveDateRange(req.query);
+  // CONFIRMED-only excludes DRAFT (not yet finalized) and CANCELLED sales.
+  // Returns are handled "for free" -- returnSale() reduces totalCents /
+  // paidAmountCents / outstandingCents on the sale document in place, so
+  // these aggregates already reflect the post-return figures.
+  const match = { status: 'CONFIRMED', createdBy: user._id, createdAt: { $gte: start, $lte: end } };
+
+  const [[agg], byAccount, byDay] = await Promise.all([
+    Sale.aggregate([
+      { $match: match },
+      {
+        $group: {
+          _id: null,
+          totalSales: { $sum: '$totalCents' },
+          invoiceCount: { $sum: 1 },
+          itemsSold: { $sum: { $sum: '$items.quantity' } },
+          cashCollected: { $sum: '$paidAmountCents' },
+          // Wallet-funded amounts never post a new Account receipt (the cash
+          // already entered an Account at deposit time) -- reported
+          // separately so it is never added into paymentByAccount below.
+          walletCollected: { $sum: '$walletAmountCents' },
+          creditExtended: { $sum: '$balanceAddedCents' },
+        },
+      },
+    ]),
+    Sale.aggregate([
+      { $match: { ...match, paymentAccount: { $ne: null }, paidAmountCents: { $gt: 0 } } },
+      { $lookup: { from: 'accounts', localField: 'paymentAccount', foreignField: '_id', as: 'acc' } },
+      { $group: { _id: { $ifNull: [{ $arrayElemAt: ['$acc.name', 0] }, 'Unknown'] }, amount: { $sum: '$paidAmountCents' } } },
+      { $sort: { amount: -1 } },
+    ]),
+    Sale.aggregate([
+      { $match: match },
+      {
+        $group: {
+          _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
+          totalSales: { $sum: '$totalCents' },
+          count: { $sum: 1 },
+        },
+      },
+      { $sort: { _id: 1 } },
+    ]),
+  ]);
+
+  res.json({
+    success: true,
+    data: {
+      user: { id: user._id, name: user.name, username: user.username, role: user.role },
+      range: { from: start, to: end },
+      totalSales: fromCents(agg?.totalSales || 0),
+      invoiceCount: agg?.invoiceCount || 0,
+      itemsSold: agg?.itemsSold || 0,
+      cashCollected: fromCents(agg?.cashCollected || 0),
+      walletCollected: fromCents(agg?.walletCollected || 0),
+      creditExtended: fromCents(agg?.creditExtended || 0),
+      averageSaleValue:
+        (agg?.invoiceCount || 0) > 0 ? fromCents(Math.round((agg.totalSales || 0) / agg.invoiceCount)) : 0,
+      paymentByAccount: byAccount.map((a) => ({ account: a._id, amount: fromCents(a.amount) })),
+      byDay: byDay.map((d) => ({ date: d._id, totalSales: fromCents(d.totalSales), count: d.count })),
     },
   });
 });
