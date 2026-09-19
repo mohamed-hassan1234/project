@@ -13,7 +13,7 @@ import Purchase from '../src/models/Purchase.js';
 import StockEntry from '../src/models/StockEntry.js';
 import Sale from '../src/models/Sale.js';
 import AccountTransaction from '../src/models/AccountTransaction.js';
-import { closeDay } from '../src/services/dayCloseService.js';
+import { closeDay, openDay } from '../src/services/dayCloseService.js';
 
 test('purchase, stock, reservations, close-day, expiry, rollback and concurrency integration', async () => {
   // Deliberately isolated local test database; never loads .env or production data.
@@ -70,7 +70,11 @@ test('purchase, stock, reservations, close-day, expiry, rollback and concurrency
     assert.equal(confirmed.costOfGoodsCents, 5600);
     assert.equal((await InventoryItem.findById(item.id)).quantity, 70);
     assert.equal((await InventoryItem.findById(item.id)).reservedQuantity, 0);
-    await assert.rejects(() => closeDay({ user }), /no pending/);
+    // Close Day now gates on an explicit OPEN/CLOSED business-day state --
+    // a second close attempt without an Open Day in between is rejected
+    // outright, regardless of whether any drafts exist.
+    await assert.rejects(() => closeDay({ user }), /already closed/);
+    await openDay({ user });
     const cancelDraft = await request('/sales', { customerId: customer.id, items: [{ itemId: item.id, quantity: 70 }] });
     assert.equal(cancelDraft.status, 201);
     assert.equal((await request(`/sales/${cancelDraft.data.id}/cancel`, {})).status, 200);
@@ -97,6 +101,7 @@ test('purchase, stock, reservations, close-day, expiry, rollback and concurrency
     assert.equal(edited.status, 200, JSON.stringify(edited));
     assert.equal((await InventoryItem.findById(item.id)).reservedQuantity, 5);
     await InventoryLot.updateMany({ item: item.id, remainingQuantity: { $gt: 0 } }, { $set: { expiryDate: new Date('2020-01-01') } });
+    await openDay({ user });
     await assert.rejects(() => closeDay({ user }), /expired or is unavailable/);
     assert.equal((await InventoryItem.findById(item.id)).quantity, 100);
     assert.equal((await request(`/sales/${winner.data.id}/cancel`, {})).status, 200);
@@ -113,7 +118,13 @@ test('purchase, stock, reservations, close-day, expiry, rollback and concurrency
     // succeed -- overdraft is allowed -- and neither debit is lost to a race.
     const payments = await Promise.all([request('/purchases', { supplierId: supplier.id, amount: 500, purchaseAccountId: account.id }), request('/purchases', { supplierId: supplier.id, amount: 500, purchaseAccountId: account.id })]);
     assert.deepEqual(payments.map(p => p.status).sort(), [201, 201]);
-    assert.equal((await Account.findById(account.id)).currentBalanceCents, -110000);
+    // Not -110000: Close Day now resets every operational Account to $0
+    // (with an auditable ADJUSTMENT transaction) each time it runs, and it
+    // ran twice above -- so this account's balance is just these two -$500
+    // purchases made since the second reset (each fully paid, since
+    // amountPaid was omitted), not an accumulation all the way back to
+    // before either close.
+    assert.equal((await Account.findById(account.id)).currentBalanceCents, -100000);
   } finally {
     await new Promise(resolve => server.close(resolve));
     await mongoose.disconnect();

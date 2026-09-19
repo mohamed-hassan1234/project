@@ -5,11 +5,13 @@ import Payment from '../models/Payment.js';
 import CustomerLedger from '../models/CustomerLedger.js';
 import Account from '../models/Account.js';
 import DayClose from '../models/DayClose.js';
+import BusinessDay from '../models/BusinessDay.js';
+import User from '../models/User.js';
 import { nextSequence } from '../models/Counter.js';
 import { ApiError } from '../utils/ApiError.js';
 import { consumeReservedBatches, reserveBatches } from './batchService.js';
 import { confirmReservation } from './stockService.js';
-import { postTransaction } from './accountService.js';
+import { postTransaction, postImmediateTransaction } from './accountService.js';
 import { runInTransaction } from '../utils/transaction.js';
 
 function startOfDay(date = new Date()) {
@@ -22,6 +24,63 @@ async function generatePaymentReceiptNumber(session) {
   const seq = await nextSequence('payment', session);
   const year = new Date().getFullYear();
   return `PAY-${year}-${String(seq).padStart(6, '0')}`;
+}
+
+// Live OPEN/CLOSED switch that saleService.createSaleDraft checks on every
+// new sale. Defaults to OPEN and lazily creates the singleton document so
+// an existing deployment upgrading to this feature never finds POS
+// unexpectedly locked just because the record doesn't exist yet.
+export async function getBusinessDayStatus() {
+  let bd = await BusinessDay.findById('current');
+  if (!bd) {
+    bd = await BusinessDay.create({ _id: 'current', status: 'OPEN', businessDate: startOfDay(), openedAt: new Date() });
+  }
+  return bd;
+}
+
+// Admin-only: reopens Seller/POS after a Close Day. Does not touch DayClose
+// history or Account balances -- accounts are already at $0 from the close
+// that preceded this, which is exactly the state the next session should
+// start from.
+export async function openDay({ user } = {}) {
+  const bd = await getBusinessDayStatus();
+  if (bd.status === 'OPEN') throw new ApiError(409, 'The day is already open.');
+  bd.status = 'OPEN';
+  bd.businessDate = startOfDay();
+  bd.openedAt = new Date();
+  bd.openedBy = user?._id || null;
+  bd.openedByName = user?.name || 'system';
+  await bd.save();
+  return bd;
+}
+
+// Zeroes every active Account with a non-zero balance, posting one
+// auditable ADJUSTMENT transaction per account (never a silent overwrite)
+// so the ledger fully explains why the balance moved. Returns the
+// pre-reset balances for the DayClose snapshot to preserve permanently.
+async function resetOperationalAccounts(session, user) {
+  const accounts = await Account.find({ isActive: true }).session(session);
+  const before = [];
+  for (const account of accounts) {
+    if (account.currentBalanceCents === 0) continue;
+    before.push({ account: account._id, accountName: account.name, balanceBeforeResetCents: account.currentBalanceCents });
+    const direction = account.currentBalanceCents > 0 ? 'OUT' : 'IN';
+    const amountCents = Math.abs(account.currentBalanceCents);
+    await postImmediateTransaction(
+      {
+        account,
+        direction,
+        type: 'ADJUSTMENT',
+        amountCents,
+        referenceType: 'Manual',
+        referenceId: null,
+        description: `Close Day reset (${startOfDay().toDateString()})`,
+        createdBy: user,
+      },
+      session
+    );
+  }
+  return before;
 }
 
 // Read-only validation pass: every Draft must still reference a real
@@ -49,10 +108,13 @@ export async function validateDraftsForClose(drafts) {
 }
 
 // Builds the Close Day review screen: every outstanding Draft plus summary
-// totals. Read-only -- never mutates anything.
+// totals, plus today's payment/cashier breakdown computed from already-
+// PENDING account receipts (nothing posted yet -- this is a preview).
+// Read-only -- never mutates anything.
 export async function buildDayClosePreview() {
-  const drafts = await Sale.find({ status: 'DRAFT' }).sort({ createdAt: 1 });
+  const drafts = await Sale.find({ status: 'DRAFT' }).sort({ createdAt: 1 }).populate('paymentAccount', 'name').populate('createdBy', 'name');
   const problems = await validateDraftsForClose(drafts);
+  const businessDay = await getBusinessDayStatus();
 
   const totals = drafts.reduce(
     (acc, s) => {
@@ -64,20 +126,54 @@ export async function buildDayClosePreview() {
     { totalValueCents: 0, totalPaidCents: 0, totalReservedUnits: 0 }
   );
 
-  return { drafts, problems, totals, readyToConfirm: problems.length === 0 && drafts.length > 0 };
+  // Payments Breakdown by Account, and by Cashier/User -- from pending
+  // (not-yet-posted) receipts on today's drafts, so the admin can see what
+  // Close Day is about to post before confirming.
+  const byAccount = new Map();
+  const byCashier = new Map();
+  for (const s of drafts) {
+    if (s.paidAmountCents <= 0 || !s.paymentAccount) continue;
+    const accId = String(s.paymentAccount._id || s.paymentAccount);
+    const accName = s.paymentAccount.name || 'Account';
+    const acc = byAccount.get(accId) || { account: accId, accountName: accName, amountCents: 0 };
+    acc.amountCents += s.paidAmountCents;
+    byAccount.set(accId, acc);
+
+    const userId = String(s.createdBy?._id || s.createdBy || 'unknown');
+    const userName = s.createdBy?.name || 'Unknown';
+    const cashier = byCashier.get(userId) || { user: userId, userName, byAccount: new Map(), totalCents: 0 };
+    const cashierAcc = cashier.byAccount.get(accId) || { account: accId, accountName: accName, amountCents: 0 };
+    cashierAcc.amountCents += s.paidAmountCents;
+    cashier.byAccount.set(accId, cashierAcc);
+    cashier.totalCents += s.paidAmountCents;
+    byCashier.set(userId, cashier);
+  }
+
+  return {
+    drafts,
+    problems,
+    totals,
+    readyToConfirm: problems.length === 0,
+    businessDay,
+    paymentBreakdown: Array.from(byAccount.values()),
+    cashierBreakdown: Array.from(byCashier.values()).map((c) => ({ ...c, byAccount: Array.from(c.byAccount.values()) })),
+  };
 }
 
 // The Close Day process itself. Confirms every valid Draft sale: converts
 // its stock reservation into a permanent deduction, runs real FIFO lot
 // consumption for historical COGS, posts revenue/COGS/profit, posts the
-// customer's debt/payment, and posts its pending account transaction.
-// Wrapped in a single Mongo transaction so nothing can half-apply.
+// customer's debt/payment, and posts its pending account transaction. Then
+// resets every operational Account to $0 (with a full audit trail) and
+// closes the business day. Wrapped in a single Mongo transaction so
+// nothing can half-apply.
 export async function closeDay({ user } = {}) {
-  const drafts = await Sale.find({ status: 'DRAFT' }).sort({ createdAt: 1 });
-  if (drafts.length === 0) {
-    throw new ApiError(409, 'There are no pending draft invoices to close.');
+  const businessDay = await getBusinessDayStatus();
+  if (businessDay.status === 'CLOSED') {
+    throw new ApiError(409, 'The day is already closed. Open the day before closing it again.');
   }
 
+  const drafts = await Sale.find({ status: 'DRAFT' }).sort({ createdAt: 1 });
   const problems = await validateDraftsForClose(drafts);
   if (problems.length > 0) {
     throw new ApiError(409, 'Some draft invoices are not valid and must be fixed before closing the day.', { problems });
@@ -92,10 +188,15 @@ export async function closeDay({ user } = {}) {
     let cashCollectedCents = 0;
     let customerCreditCents = 0;
     const paymentBreakdownMap = new Map(); // accountId -> { accountName, amountCents }
+    const cashierBreakdownMap = new Map(); // userId -> { userName, byAccount: Map, totalCents }
+    const userNameCache = new Map();
+    const invoiceReferences = [];
     const confirmedSales = [];
 
+    const bd = await BusinessDay.findById('current').session(session);
+    if (bd && bd.status === 'CLOSED') throw new ApiError(409, 'The day was already closed.');
+
     const currentDrafts = await Sale.find({ status: 'DRAFT' }).sort({ createdAt: 1 }).session(session);
-    if (!currentDrafts.length) throw new ApiError(409, 'Drafts were already closed.');
     for (const sale of currentDrafts) {
       // 1. Convert reservation into a permanent stock deduction and run
       // real FIFO consumption so COGS/profit reflect actual purchase cost.
@@ -162,15 +263,33 @@ export async function closeDay({ user } = {}) {
         );
       }
 
-      // 3. Post the pending account transaction (money actually moves now).
+      // 3. Post the pending account transaction (money actually moves now)
+      // and attribute it to both the Account and the cashier who took it.
       if (sale.accountTransaction) {
         const txn = await postTransaction(sale.accountTransaction, session);
         if (txn) {
-          const key = String(txn.account);
+          const accKey = String(txn.account);
           const account = await Account.findById(txn.account).session(session);
-          const existing = paymentBreakdownMap.get(key) || { account: txn.account, accountName: account?.name || 'Account', amountCents: 0 };
-          existing.amountCents += txn.amountCents;
-          paymentBreakdownMap.set(key, existing);
+          const existingAcc = paymentBreakdownMap.get(accKey) || { account: txn.account, accountName: account?.name || 'Account', amountCents: 0 };
+          existingAcc.amountCents += txn.amountCents;
+          paymentBreakdownMap.set(accKey, existingAcc);
+
+          const userKey = String(sale.createdBy || 'unknown');
+          if (!userNameCache.has(userKey) && sale.createdBy) {
+            const u = await User.findById(sale.createdBy).session(session);
+            userNameCache.set(userKey, u?.name || 'Unknown');
+          }
+          const cashier = cashierBreakdownMap.get(userKey) || {
+            user: sale.createdBy || null,
+            userName: userNameCache.get(userKey) || 'Unknown',
+            byAccount: new Map(),
+            totalCents: 0,
+          };
+          const cashierAcc = cashier.byAccount.get(accKey) || { account: txn.account, accountName: account?.name || 'Account', amountCents: 0 };
+          cashierAcc.amountCents += txn.amountCents;
+          cashier.byAccount.set(accKey, cashierAcc);
+          cashier.totalCents += txn.amountCents;
+          cashierBreakdownMap.set(userKey, cashier);
         }
       }
 
@@ -189,38 +308,52 @@ export async function closeDay({ user } = {}) {
       grossProfitCents += profitCents;
       cashCollectedCents += sale.paidAmountCents;
       customerCreditCents += balanceAddedCents;
+      invoiceReferences.push(sale.receiptNumber);
       confirmedSales.push(sale);
     }
 
-    const paymentBreakdown = Array.from(paymentBreakdownMap.values());
+    // 5. Reset every operational Account to $0 -- with a full audit trail,
+    // capturing what each one held immediately before the reset.
+    const accountBalancesBeforeReset = await resetOperationalAccounts(session, user);
 
-    const dayClose = await DayClose.findOneAndUpdate(
-      { businessDate },
-      {
-        $inc: {
+    const paymentBreakdown = Array.from(paymentBreakdownMap.values());
+    const cashierBreakdown = Array.from(cashierBreakdownMap.values()).map((c) => ({ ...c, byAccount: Array.from(c.byAccount.values()) }));
+
+    const [dayClose] = await DayClose.create(
+      [
+        {
+          businessDate,
           invoiceCount: confirmedSales.length,
           revenueCents,
           cogsCents,
           grossProfitCents,
           cashCollectedCents,
           customerCreditCents,
+          paymentBreakdown,
+          cashierBreakdown,
+          accountBalancesBeforeReset,
+          invoiceReferences,
+          openedAt: bd?.openedAt || null,
+          closedBy: user?._id || null,
+          closedByName: user?.name || 'system',
+          closedAt: new Date(),
         },
-        $set: { closedBy: user?._id || null, closedByName: user?.name || 'system', closedAt: new Date() },
-        $setOnInsert: { businessDate },
-      },
-      { upsert: true, new: true, session }
+      ],
+      { session }
     );
 
-    // Merge payment breakdown across possibly-repeated closes of the same day.
-    const mergedBreakdown = new Map((dayClose.paymentBreakdown || []).map((p) => [String(p.account), { ...p.toObject?.() ?? p }]));
-    for (const p of paymentBreakdown) {
-      const key = String(p.account);
-      const existing = mergedBreakdown.get(key);
-      if (existing) existing.amountCents = (existing.amountCents || 0) + p.amountCents;
-      else mergedBreakdown.set(key, p);
-    }
-    dayClose.paymentBreakdown = Array.from(mergedBreakdown.values());
-    await dayClose.save({ session });
+    // 6. Flip the business day to CLOSED.
+    await BusinessDay.findByIdAndUpdate(
+      'current',
+      {
+        status: 'CLOSED',
+        closedAt: new Date(),
+        closedBy: user?._id || null,
+        closedByName: user?.name || 'system',
+        lastDayClose: dayClose._id,
+      },
+      { upsert: true, session }
+    );
 
     return { dayClose, confirmedSales };
   });
@@ -233,7 +366,7 @@ export async function getDayCloseHistory({ page = 1, limit = 20 } = {}) {
   const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
   const [items, total] = await Promise.all([
     DayClose.find()
-      .sort({ businessDate: -1 })
+      .sort({ businessDate: -1, closedAt: -1 })
       .skip((pageNum - 1) * limitNum)
       .limit(limitNum),
     DayClose.countDocuments(),

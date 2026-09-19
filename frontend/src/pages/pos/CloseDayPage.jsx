@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowLeft, Lock, AlertTriangle, Printer, CheckCircle2 } from 'lucide-react';
+import { ArrowLeft, Lock, LockOpen, AlertTriangle, Printer, CheckCircle2, History } from 'lucide-react';
 import client from '../../api/client.js';
 import { useAuth } from '../../context/AuthContext.jsx';
 import { useToast } from '../../context/ToastContext.jsx';
@@ -19,10 +19,12 @@ export default function CloseDayPage() {
   const toast = useToast();
   const { user } = useAuth();
   const canCloseDay = user?.role === 'admin' || user?.role === 'manager';
+  const isAdmin = user?.role === 'admin';
   const [preview, setPreview] = useState(null);
   const [loading, setLoading] = useState(true);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [closing, setClosing] = useState(false);
+  const [opening, setOpening] = useState(false);
   const [result, setResult] = useState(null);
 
   const load = useCallback(() => {
@@ -50,6 +52,20 @@ export default function CloseDayPage() {
     }
   };
 
+  const handleOpenDay = async () => {
+    setOpening(true);
+    try {
+      await client.post('/day-close/open');
+      toast.success('Business day opened. Seller/POS is available again.');
+      setResult(null);
+      load();
+    } catch (err) {
+      toast.error(err.friendlyMessage || 'Could not open the day.');
+    } finally {
+      setOpening(false);
+    }
+  };
+
   if (loading) return <PageSpinner />;
 
   if (result) {
@@ -59,9 +75,19 @@ export default function CloseDayPage() {
           <Link to="/pos" className="flex items-center gap-1.5 text-sm font-medium text-slate-500 hover:text-slate-700">
             <ArrowLeft className="h-4 w-4" /> Back to POS
           </Link>
-          <Button onClick={() => printReport('portrait')}>
-            <Printer className="h-4 w-4" /> Print Day Summary
-          </Button>
+          <div className="flex gap-2">
+            <Link to="/pos/close-day/history">
+              <Button variant="secondary"><History className="h-4 w-4" /> Closing History</Button>
+            </Link>
+            <Button onClick={() => printReport('portrait')}>
+              <Printer className="h-4 w-4" /> Print Day Summary
+            </Button>
+            {isAdmin && (
+              <Button onClick={handleOpenDay} loading={opening}>
+                <LockOpen className="h-4 w-4" /> Open the Day
+              </Button>
+            )}
+          </div>
         </div>
 
         <div id="print-area" className="mx-auto max-w-2xl rounded-2xl border border-slate-200 bg-white p-8 shadow-sm print:rounded-none print:border-0 print:shadow-none">
@@ -90,7 +116,7 @@ export default function CloseDayPage() {
           </div>
 
           <div className="mt-6 border-t border-dashed border-slate-300 pt-4">
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Payment Breakdown</p>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Payments Breakdown by Account</p>
             {result.paymentBreakdown.length === 0 ? (
               <p className="text-sm text-slate-400">No payments recorded today.</p>
             ) : (
@@ -104,6 +130,58 @@ export default function CloseDayPage() {
               </div>
             )}
           </div>
+
+          <div className="mt-6 border-t border-dashed border-slate-300 pt-4">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Payments Breakdown by Cashier</p>
+            {result.cashierBreakdown.length === 0 ? (
+              <p className="text-sm text-slate-400">No payments recorded today.</p>
+            ) : (
+              <div className="space-y-3">
+                {result.cashierBreakdown.map((c) => (
+                  <div key={c.user || c.userName} className="rounded-lg bg-slate-50 p-3">
+                    <div className="flex justify-between text-sm font-semibold text-slate-800">
+                      <span>{c.userName}</span>
+                      <span>{formatCurrency(c.total)}</span>
+                    </div>
+                    <div className="mt-1.5 space-y-1 pl-2">
+                      {c.byAccount.map((a) => (
+                        <div key={a.account} className="flex justify-between text-xs text-slate-500">
+                          <span>{a.accountName}</span>
+                          <span>{formatCurrency(a.amount)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="mt-6 border-t border-dashed border-slate-300 pt-4">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Account Reset (audited)</p>
+            {result.accountBalancesBeforeReset.length === 0 ? (
+              <p className="text-sm text-slate-400">No account balances needed resetting.</p>
+            ) : (
+              <div className="space-y-1.5">
+                {result.accountBalancesBeforeReset.map((a) => (
+                  <div key={a.account} className="flex justify-between text-sm">
+                    <span className="text-slate-600">{a.accountName}</span>
+                    <span className="text-slate-500">
+                      {formatCurrency(a.balanceBeforeReset)} <span className="text-slate-300">&rarr;</span> <span className="font-semibold text-slate-800">$0.00</span>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {isAdmin && (
+            <div className="mt-6 border-t border-dashed border-slate-300 pt-4 text-center no-print">
+              <Button onClick={handleOpenDay} loading={opening}>
+                <LockOpen className="h-4 w-4" /> Open the Day
+              </Button>
+            </div>
+          )}
         </div>
       </div>
     );
@@ -115,14 +193,28 @@ export default function CloseDayPage() {
         <Link to="/pos" className="flex items-center gap-1.5 text-sm font-medium text-slate-500 hover:text-slate-700">
           <ArrowLeft className="h-4 w-4" /> Back to POS
         </Link>
+        <Link to="/pos/close-day/history">
+          <Button variant="secondary"><History className="h-4 w-4" /> Closing History</Button>
+        </Link>
       </div>
 
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-bold text-slate-900">Close Day / Xir Maalinta</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl font-bold text-slate-900">Close Day / Xir Maalinta</h1>
+            <Badge color={preview.businessDay.status === 'OPEN' ? 'green' : 'red'}>{preview.businessDay.status}</Badge>
+          </div>
           <p className="mt-0.5 text-sm text-slate-500">{formatDate(preview.date)} · Review every pending invoice before confirming</p>
         </div>
-        {canCloseDay ? (
+        {preview.businessDay.status === 'CLOSED' ? (
+          isAdmin ? (
+            <Button size="lg" onClick={handleOpenDay} loading={opening}>
+              <LockOpen className="h-4 w-4" /> Open the Day
+            </Button>
+          ) : (
+            <Badge color="red">Maalintu waa xiran tahay, fadlan sug Admin inuu furo.</Badge>
+          )
+        ) : canCloseDay ? (
           <Button size="lg" disabled={!preview.readyToConfirm} onClick={() => setConfirmOpen(true)}>
             <Lock className="h-4 w-4" /> Close Day
           </Button>
@@ -155,6 +247,47 @@ export default function CloseDayPage() {
         <StatBox label="Payments Received" value={formatCurrency(preview.totalPaymentsReceived)} />
         <StatBox label="Reserved Units" value={preview.totalReservedUnits} />
       </div>
+
+      {(preview.paymentBreakdown.length > 0 || preview.cashierBreakdown.length > 0) && (
+        <div className="mb-6 grid gap-4 sm:grid-cols-2">
+          <Card title="Payments Breakdown by Account (Today)">
+            {preview.paymentBreakdown.length === 0 ? (
+              <p className="py-4 text-center text-sm text-slate-400">No payments yet today.</p>
+            ) : (
+              <div className="space-y-1.5">
+                {preview.paymentBreakdown.map((p) => (
+                  <div key={p.account} className="flex justify-between text-sm">
+                    <span className="text-slate-600">{p.accountName}</span>
+                    <span className="font-semibold text-slate-800">{formatCurrency(p.amount)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+          <Card title="Payments Breakdown by Cashier">
+            {preview.cashierBreakdown.length === 0 ? (
+              <p className="py-4 text-center text-sm text-slate-400">No payments yet today.</p>
+            ) : (
+              <div className="space-y-2">
+                {preview.cashierBreakdown.map((c) => (
+                  <div key={c.user || c.userName}>
+                    <div className="flex justify-between text-sm font-semibold text-slate-800">
+                      <span>{c.userName}</span>
+                      <span>{formatCurrency(c.total)}</span>
+                    </div>
+                    {c.byAccount.map((a) => (
+                      <div key={a.account} className="flex justify-between pl-2 text-xs text-slate-500">
+                        <span>{a.accountName}</span>
+                        <span>{formatCurrency(a.amount)}</span>
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+        </div>
+      )}
 
       <Table>
         <THead>
@@ -193,11 +326,17 @@ export default function CloseDayPage() {
         <p className="text-sm text-slate-600">
           You are about to close <strong>{formatDate(preview.date)}</strong>.
         </p>
-        <p className="mt-2 text-sm text-slate-600">
-          <strong>{preview.totalDraftInvoices}</strong> invoice{preview.totalDraftInvoices === 1 ? '' : 's'} worth{' '}
-          <strong>{formatCurrency(preview.totalDraftValue)}</strong> will be confirmed permanently.
-        </p>
-        <p className="mt-2 text-sm font-medium text-rose-600">After confirmation they can no longer be directly edited or deleted.</p>
+        {preview.totalDraftInvoices > 0 && (
+          <div className="mt-3 rounded-lg bg-amber-50 p-3">
+            <p className="text-sm font-semibold text-amber-800">
+              {preview.totalDraftInvoices} Draft Invoice{preview.totalDraftInvoices === 1 ? '' : 's'} ayaa jira oo aan la xaqiijin.
+            </p>
+            <p className="mt-1 text-sm text-amber-700">
+              Ma rabtaa inaad xaqiijiso ka hor inta aan maalintu xirmin? Worth <strong>{formatCurrency(preview.totalDraftValue)}</strong> will be confirmed permanently.
+            </p>
+          </div>
+        )}
+        <p className="mt-2 text-sm font-medium text-rose-600">After confirmation they can no longer be directly edited or deleted. Every operational Account will also be reset to $0 (fully audited).</p>
         <div className="mt-5 flex justify-end gap-2">
           <Button variant="secondary" onClick={() => setConfirmOpen(false)} disabled={closing}>
             Cancel

@@ -47,6 +47,16 @@ export default function POSPage() {
   const [drafts, setDrafts] = useState([]);
   const [draftsLoading, setDraftsLoading] = useState(true);
 
+  // Backend independently rejects sale creation while CLOSED regardless of
+  // this check (see saleService.createSaleDraft) -- this is only so a
+  // non-admin sees a clear message instead of a confusing error after
+  // filling out the whole form.
+  const [businessDayStatus, setBusinessDayStatus] = useState(null);
+  useEffect(() => {
+    client.get('/day-close/status').then((res) => setBusinessDayStatus(res.data.data)).catch(() => setBusinessDayStatus(null));
+  }, []);
+  const posLocked = businessDayStatus?.status === 'CLOSED' && user?.role !== 'admin';
+
   const loadDrafts = useCallback(() => {
     setDraftsLoading(true);
     client
@@ -269,6 +279,16 @@ export default function POSPage() {
       setSubmitting(false);
     }
   };
+
+  if (posLocked) {
+    return (
+      <div className="flex h-[60vh] flex-col items-center justify-center text-center">
+        <Lock className="mb-3 h-8 w-8 text-slate-300" />
+        <p className="text-lg font-semibold text-rose-600">Maalintu waa xiran tahay, fadlan sug Admin inuu furo.</p>
+        <p className="mt-1 text-sm text-slate-400">The business day is closed. Please wait for an admin to open it.</p>
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto max-w-5xl space-y-4">

@@ -8,6 +8,7 @@ import { ApiError } from '../utils/ApiError.js';
 import { toCents } from '../utils/money.js';
 import { reserveStock } from './stockService.js';
 import { createPendingTransaction } from './accountService.js';
+import { getBusinessDayStatus } from './dayCloseService.js';
 
 // Debits the customer's wallet immediately (Draft creation/edit), recording
 // a SALE_PAYMENT wallet transaction. Never touches any Account -- that cash
@@ -112,6 +113,16 @@ export function resolveLinePricing(line, item, quotedUnitPriceCents) {
 
 // Authoritative draft creation, shared by POS and quotation conversion.
 export async function createSaleDraft(payload, user, session, { quotedPrices, quotationId } = {}) {
+  // Non-admins cannot start a new sale while the business day is closed --
+  // enforced here (not just in the UI) so a direct API call can't bypass
+  // it. Admin retains access, matching Close Day's own admin-only confirm.
+  if (user?.role !== 'admin') {
+    const businessDay = await getBusinessDayStatus();
+    if (businessDay.status === 'CLOSED') {
+      throw new ApiError(403, 'Maalintu waa xiran tahay, fadlan sug Admin inuu furo.');
+    }
+  }
+
   const { customerId, items, discount = 0, paidAmount = 0, walletAmount = 0, paymentAccountId } = payload;
   if (!customerId) throw new ApiError(400, 'Please select or create a customer before completing the sale.');
   validateSaleItems({ items, discount, paidAmount });

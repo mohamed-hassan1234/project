@@ -1,17 +1,64 @@
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { fromCents } from '../utils/money.js';
 import { logAudit } from '../services/auditService.js';
-import { buildDayClosePreview, closeDay, getDayCloseHistory } from '../services/dayCloseService.js';
+import { buildDayClosePreview, closeDay, getDayCloseHistory, getBusinessDayStatus, openDay } from '../services/dayCloseService.js';
 import { saleToDTO } from './saleController.js';
+
+function businessDayDTO(bd) {
+  return {
+    status: bd.status,
+    businessDate: bd.businessDate,
+    openedAt: bd.openedAt,
+    openedByName: bd.openedByName,
+    closedAt: bd.closedAt,
+    closedByName: bd.closedByName,
+  };
+}
+
+function dayCloseDTO(d) {
+  return {
+    id: d._id,
+    businessDate: d.businessDate,
+    invoiceCount: d.invoiceCount,
+    revenue: fromCents(d.revenueCents),
+    cogs: fromCents(d.cogsCents),
+    grossProfit: fromCents(d.grossProfitCents),
+    cashCollected: fromCents(d.cashCollectedCents),
+    customerCredit: fromCents(d.customerCreditCents),
+    paymentBreakdown: d.paymentBreakdown.map((p) => ({ account: p.account, accountName: p.accountName, amount: fromCents(p.amountCents) })),
+    cashierBreakdown: (d.cashierBreakdown || []).map((c) => ({
+      user: c.user,
+      userName: c.userName,
+      byAccount: c.byAccount.map((a) => ({ account: a.account, accountName: a.accountName, amount: fromCents(a.amountCents) })),
+      total: fromCents(c.totalCents),
+    })),
+    accountBalancesBeforeReset: (d.accountBalancesBeforeReset || []).map((a) => ({
+      account: a.account,
+      accountName: a.accountName,
+      balanceBeforeReset: fromCents(a.balanceBeforeResetCents),
+    })),
+    invoiceReferences: d.invoiceReferences || [],
+    openedAt: d.openedAt,
+    closedByName: d.closedByName,
+    closedAt: d.closedAt,
+  };
+}
+
+// GET /api/day-close/status -- the live OPEN/CLOSED switch Seller/POS checks.
+export const getStatus = asyncHandler(async (req, res) => {
+  const bd = await getBusinessDayStatus();
+  res.json({ success: true, data: businessDayDTO(bd) });
+});
 
 // GET /api/day-close/preview -- the review screen shown before actually closing
 export const getPreview = asyncHandler(async (req, res) => {
-  const { drafts, problems, totals, readyToConfirm } = await buildDayClosePreview();
+  const { drafts, problems, totals, readyToConfirm, businessDay, paymentBreakdown, cashierBreakdown } = await buildDayClosePreview();
 
   res.json({
     success: true,
     data: {
       date: new Date(),
+      businessDay: businessDayDTO(businessDay),
       invoices: drafts.map(saleToDTO),
       totalDraftInvoices: drafts.length,
       totalDraftValue: fromCents(totals.totalValueCents),
@@ -19,6 +66,13 @@ export const getPreview = asyncHandler(async (req, res) => {
       totalReservedUnits: totals.totalReservedUnits,
       problems,
       readyToConfirm,
+      paymentBreakdown: paymentBreakdown.map((p) => ({ account: p.account, accountName: p.accountName, amount: fromCents(p.amountCents) })),
+      cashierBreakdown: cashierBreakdown.map((c) => ({
+        user: c.user,
+        userName: c.userName,
+        byAccount: c.byAccount.map((a) => ({ account: a.account, accountName: a.accountName, amount: fromCents(a.amountCents) })),
+        total: fromCents(c.totalCents),
+      })),
     },
   });
 });
@@ -38,41 +92,22 @@ export const confirmClose = asyncHandler(async (req, res) => {
 
   res.status(201).json({
     success: true,
-    data: {
-      id: dayClose._id,
-      businessDate: dayClose.businessDate,
-      invoiceCount: dayClose.invoiceCount,
-      revenue: fromCents(dayClose.revenueCents),
-      cogs: fromCents(dayClose.cogsCents),
-      grossProfit: fromCents(dayClose.grossProfitCents),
-      cashCollected: fromCents(dayClose.cashCollectedCents),
-      customerCredit: fromCents(dayClose.customerCreditCents),
-      paymentBreakdown: dayClose.paymentBreakdown.map((p) => ({ account: p.account, accountName: p.accountName, amount: fromCents(p.amountCents) })),
-      closedByName: dayClose.closedByName,
-      closedAt: dayClose.closedAt,
-      confirmedInvoices: confirmedSales.map(saleToDTO),
-    },
+    data: { ...dayCloseDTO(dayClose), confirmedInvoices: confirmedSales.map(saleToDTO) },
   });
+});
+
+// POST /api/day-close/open -- admin-only reopen. Route already restricts to
+// admin, but the service layer double-checks too.
+export const openDayHandler = asyncHandler(async (req, res) => {
+  const bd = await openDay({ user: req.user });
+
+  await logAudit({ user: req.user, action: 'dayclose.open', entityType: 'BusinessDay', entityId: 'current', details: {} });
+
+  res.json({ success: true, data: businessDayDTO(bd) });
 });
 
 // GET /api/day-close/history
 export const listHistory = asyncHandler(async (req, res) => {
   const { items, pagination } = await getDayCloseHistory(req.query);
-  res.json({
-    success: true,
-    data: items.map((d) => ({
-      id: d._id,
-      businessDate: d.businessDate,
-      invoiceCount: d.invoiceCount,
-      revenue: fromCents(d.revenueCents),
-      cogs: fromCents(d.cogsCents),
-      grossProfit: fromCents(d.grossProfitCents),
-      cashCollected: fromCents(d.cashCollectedCents),
-      customerCredit: fromCents(d.customerCreditCents),
-      paymentBreakdown: d.paymentBreakdown.map((p) => ({ account: p.account, accountName: p.accountName, amount: fromCents(p.amountCents) })),
-      closedByName: d.closedByName,
-      closedAt: d.closedAt,
-    })),
-    pagination,
-  });
+  res.json({ success: true, data: items.map(dayCloseDTO), pagination });
 });

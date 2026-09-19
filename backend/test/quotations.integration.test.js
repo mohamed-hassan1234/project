@@ -65,8 +65,16 @@ test('quotation lifecycle, concurrent conversion, rollback, reports and debt-acc
     await closeDay({ user });
     assert.equal((await InventoryItem.findById(product.id)).quantity, 18);
     assert.equal((await Customer.findById(customer.id)).balanceCents, 6000);
-    assert.equal((await Account.findById(account.id)).currentBalanceCents, 5000);
-    assert.equal((await DayClose.findOne()).revenueCents, 11000);
+    // Not 5000: Close Day posts today's $50 EVC payment and then, in that
+    // same close, resets every operational Account to $0 with an auditable
+    // ADJUSTMENT transaction -- the $50 is preserved permanently in the
+    // DayClose snapshot's paymentBreakdown (asserted below), not in the
+    // live balance, which always starts the next business day at zero.
+    assert.equal((await Account.findById(account.id)).currentBalanceCents, 0);
+    const dayCloseDoc = await DayClose.findOne();
+    assert.equal(dayCloseDoc.revenueCents, 11000);
+    assert.equal(dayCloseDoc.paymentBreakdown.find(p => String(p.account) === String(account.id))?.amountCents, 5000);
+    assert.equal(dayCloseDoc.accountBalancesBeforeReset.find(a => String(a.account) === String(account.id))?.balanceBeforeResetCents, 5000);
     const missingAccount = await request(`/customers/${customer.id}/payments`, { amount: 40 });
     assert.equal(missingAccount.status, 400);
     const paymentPayload = { amount: 40, paymentAccountId: account.id, requestKey: 'payment-request-123' };
@@ -75,7 +83,10 @@ test('quotation lifecycle, concurrent conversion, rollback, reports and debt-acc
     assert.equal(payments[0].data.paymentId, payments[1].data.paymentId);
     assert.equal(await Payment.countDocuments({ type: 'debt_payment' }), 1);
     assert.equal((await Customer.findById(customer.id)).balanceCents, 2000);
-    assert.equal((await Account.findById(account.id)).currentBalanceCents, 9000);
+    // 4000, not 9000: the account was reset to 0 at Close Day above (see
+    // line 73), so this is just the $40 debt payment posted immediately
+    // afterward, not an accumulation on top of the pre-reset 5000.
+    assert.equal((await Account.findById(account.id)).currentBalanceCents, 4000);
     assert.equal((await Sale.findById(saleId)).totalCents, 11000);
     assert.equal((await Sale.findById(saleId)).outstandingCents, 2000);
     assert.equal(await AccountTransaction.countDocuments({ type: 'CUSTOMER_DEBT_PAYMENT' }), 1);
