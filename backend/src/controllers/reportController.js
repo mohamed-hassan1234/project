@@ -134,8 +134,17 @@ export const profitReport = asyncHandler(async (req, res) => {
       {
         $group: {
           _id: { itemId: '$items.item', itemName: '$items.itemName' },
-          revenue: { $sum: '$items.subtotalCents' },
-          cost: { $sum: { $cond: [{ $gt: [{ $size: { $ifNull: ['$items.lotConsumption', []] } }, 0] }, { $sum: { $map: { input: '$items.lotConsumption', as: 'allocation', in: { $multiply: ['$$allocation.quantity', '$$allocation.unitCostCents'] } } } }, { $multiply: ['$items.quantity', '$items.costPriceCents'] }] } },
+          // Net of this line's own discount (the canonical per-line revenue
+          // formula also used by saleController.toDTO's `lineTotal`).
+          // Residual invoice-level discount not tied to any one line is not
+          // allocated across lines here -- there is no existing allocation
+          // formula for that anywhere in the app, so this breakdown may not
+          // sum to exactly the invoice-level total when one is present.
+          revenue: { $sum: { $subtract: ['$items.subtotalCents', { $ifNull: ['$items.discountCents', 0] }] } },
+          // Authoritative historical COGS: the WAC snapshot frozen on the
+          // line at Close Day confirm time (never today's item cost, never
+          // recalculated from lot allocations -- see dayCloseService).
+          cost: { $sum: { $multiply: ['$items.quantity', '$items.costPriceCents'] } },
         },
       },
       { $addFields: { profit: { $subtract: ['$revenue', '$cost'] } } },
@@ -155,8 +164,8 @@ export const profitReport = asyncHandler(async (req, res) => {
       {
         $group: {
           _id: '$category',
-          revenue: { $sum: '$items.subtotalCents' },
-          cost: { $sum: { $cond: [{ $gt: [{ $size: { $ifNull: ['$items.lotConsumption', []] } }, 0] }, { $sum: { $map: { input: '$items.lotConsumption', as: 'allocation', in: { $multiply: ['$$allocation.quantity', '$$allocation.unitCostCents'] } } } }, { $multiply: ['$items.quantity', '$items.costPriceCents'] }] } },
+          revenue: { $sum: { $subtract: ['$items.subtotalCents', { $ifNull: ['$items.discountCents', 0] }] } },
+          cost: { $sum: { $multiply: ['$items.quantity', '$items.costPriceCents'] } },
         },
       },
       { $addFields: { profit: { $subtract: ['$revenue', '$cost'] } } },
@@ -216,15 +225,17 @@ export const profitByItemDrilldown = asyncHandler(async (req, res) => {
   for (const sale of sales) {
     for (const line of sale.items) {
       if (String(line.item) !== String(itemId)) continue;
+      const lineRevenueCents = line.subtotalCents - (line.discountCents || 0);
+      const lineCostCents = line.quantity * line.costPriceCents; // WAC snapshot frozen at Close Day -- never lot-blended, never today's cost
       rows.push({
         saleId: sale._id,
         receiptNumber: sale.receiptNumber,
         customerName: sale.customerName,
         createdAt: sale.createdAt,
         quantity: line.quantity,
-        revenue: fromCents(line.subtotalCents),
-        cost: fromCents((line.lotConsumption?.length ? line.lotConsumption.reduce((sum, a) => sum + a.quantity * a.unitCostCents, 0) : line.quantity * line.costPriceCents)),
-        profit: fromCents(line.subtotalCents - (line.lotConsumption?.length ? line.lotConsumption.reduce((sum, a) => sum + a.quantity * a.unitCostCents, 0) : line.quantity * line.costPriceCents)),
+        revenue: fromCents(lineRevenueCents),
+        cost: fromCents(lineCostCents),
+        profit: fromCents(lineRevenueCents - lineCostCents),
       });
     }
   }
@@ -497,8 +508,9 @@ export const itemProfitReport = asyncHandler(async (req, res) => {
       $group: {
         _id: null,
         quantitySold: { $sum: '$items.quantity' },
-        revenue: { $sum: '$items.subtotalCents' },
-        costOfGoodsSold: { $sum: { $cond: [{ $gt: [{ $size: { $ifNull: ['$items.lotConsumption', []] } }, 0] }, { $sum: { $map: { input: '$items.lotConsumption', as: 'allocation', in: { $multiply: ['$$allocation.quantity', '$$allocation.unitCostCents'] } } } }, { $multiply: ['$items.quantity', '$items.costPriceCents'] }] } },
+        revenue: { $sum: { $subtract: ['$items.subtotalCents', { $ifNull: ['$items.discountCents', 0] }] } },
+        // Historical WAC snapshot frozen at Close Day confirm time -- never lot-blended, never today's item cost.
+        costOfGoodsSold: { $sum: { $multiply: ['$items.quantity', '$items.costPriceCents'] } },
       },
     },
   ]);

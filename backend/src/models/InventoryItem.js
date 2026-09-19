@@ -4,7 +4,11 @@ const DEFAULT_LOW_STOCK_THRESHOLD = 5;
 
 const inventoryItemSchema = new mongoose.Schema(
   {
-    stockEvents: [{ at: { type: Date, default: Date.now }, type: { type: String }, reference: String, quantityBefore: Number, quantityAfter: Number }],
+    // averageCostBeforeCents/averageCostAfterCents are only populated for
+    // events that actually move the Weighted Average Cost (Stock IN,
+    // customer return, full sale reversal) -- undefined/null on events that
+    // only change quantity (a normal sale never changes WAC, see Phase 12).
+    stockEvents: [{ at: { type: Date, default: Date.now }, type: { type: String }, reference: String, quantityBefore: Number, quantityAfter: Number, averageCostBeforeCents: { type: Number, default: null }, averageCostAfterCents: { type: Number, default: null } }],
     itemCode: { type: String, required: true, trim: true },
     name: { type: String, required: true, trim: true },
     serialNumber: { type: String, trim: true, default: '' },
@@ -20,6 +24,14 @@ const inventoryItemSchema = new mongoose.Schema(
     // is CONFIRMED (Close Day) -- never at draft creation time.
     reservedQuantity: { type: Number, required: true, default: 0, min: 0 },
     unit: { type: String, default: 'pcs' },
+    // Weighted Average Cost (WAC) of the quantity currently in stock -- the
+    // canonical, continuously-blended acquisition cost per unit. Updated by
+    // costingService.calculateWeightedAverageCost() on every event that adds
+    // stock (Stock IN receipt, customer return, full sale reversal). A
+    // normal sale/stock-out never changes it (removing units at the current
+    // average leaves the average itself unchanged). Admins may still
+    // directly correct it via the Inventory edit form for data-entry fixes;
+    // that manual path is unrelated to the automatic receipt-time blend.
     costPriceCents: { type: Number, required: true, default: 0, min: 0 },
     sellingPriceCents: { type: Number, required: true, default: 0, min: 0 },
     // No longer set per-item from the UI; centrally defaulted so low-stock

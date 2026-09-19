@@ -14,6 +14,7 @@ import { resolveDateRange } from '../utils/dateRange.js';
 import { logAudit } from '../services/auditService.js';
 import { restoreLotConsumption } from '../services/lotService.js';
 import { reserveStock, releaseReservation } from '../services/stockService.js';
+import { calculateWeightedAverageCost } from '../services/costingService.js';
 import { createPendingTransaction, reverseTransaction, postImmediateTransaction } from '../services/accountService.js';
 
 function toDTO(sale) {
@@ -345,11 +346,33 @@ export const reverseSale = asyncHandler(async (req, res) => {
 
     // Only the portion not already restored by a prior partial return (see
     // returnSale) is restored here -- lotConsumption entries are decremented
-    // as returns consume them, so this always reflects what remains.
+    // as returns consume them, so this always reflects what remains. This is
+    // an incoming inventory movement at the line's own historical WAC
+    // snapshot (never today's cost), blended into whatever the item's
+    // average cost is right now -- same treatment as a partial return.
     for (const line of sale.items) {
       const stillConsumed = line.quantity - (line.returnedQuantity || 0);
       if (stillConsumed <= 0) continue;
-      await InventoryItem.findByIdAndUpdate(line.item, { $inc: { quantity: stillConsumed } }, { session });
+      const itemDoc = await InventoryItem.findById(line.item).session(session);
+      const oldQuantity = itemDoc.quantity;
+      const oldAverageCostCents = itemDoc.costPriceCents;
+      const newAverageCostCents = calculateWeightedAverageCost({
+        oldQuantity,
+        oldAverageCostCents,
+        incomingQuantity: stillConsumed,
+        incomingUnitCostCents: line.costPriceCents,
+      });
+      itemDoc.stockEvents.push({
+        type: 'SALE_REVERSAL',
+        reference: sale.receiptNumber,
+        quantityBefore: oldQuantity,
+        quantityAfter: oldQuantity + stillConsumed,
+        averageCostBeforeCents: oldAverageCostCents,
+        averageCostAfterCents: newAverageCostCents,
+      });
+      itemDoc.quantity = oldQuantity + stillConsumed;
+      itemDoc.costPriceCents = newAverageCostCents;
+      await itemDoc.save({ session });
       await restoreLotConsumption(line.lotConsumption, session);
     }
 
@@ -492,6 +515,13 @@ export const returnSale = asyncHandler(async (req, res) => {
     // Each lotConsumption entry's quantity is decremented as it is restored
     // (rather than left untouched), so a later full reverseSale on this same
     // invoice only restores what these returns have not already restored.
+    //
+    // Costing: a customer return is an incoming inventory movement at the
+    // HISTORICAL cost snapshot assigned when those units were originally
+    // sold (line.costPriceCents) -- never today's selling price and never
+    // blindly today's WAC. It is blended into the item's current average
+    // exactly like a Stock IN receipt (same zero-stock rule applies if the
+    // item has since sold out completely).
     for (const { index, qty, line } of returnedLines) {
       let remaining = qty;
       for (let i = line.lotConsumption.length - 1; i >= 0 && remaining > 0; i--) {
@@ -502,7 +532,26 @@ export const returnSale = asyncHandler(async (req, res) => {
         entry.quantity -= take;
         remaining -= take;
       }
-      await InventoryItem.findByIdAndUpdate(line.item, { $inc: { quantity: qty } }, { session });
+      const itemDoc = await InventoryItem.findById(line.item).session(session);
+      const oldQuantity = itemDoc.quantity;
+      const oldAverageCostCents = itemDoc.costPriceCents;
+      const newAverageCostCents = calculateWeightedAverageCost({
+        oldQuantity,
+        oldAverageCostCents,
+        incomingQuantity: qty,
+        incomingUnitCostCents: line.costPriceCents,
+      });
+      itemDoc.stockEvents.push({
+        type: 'CUSTOMER_RETURN',
+        reference: sale.receiptNumber,
+        quantityBefore: oldQuantity,
+        quantityAfter: oldQuantity + qty,
+        averageCostBeforeCents: oldAverageCostCents,
+        averageCostAfterCents: newAverageCostCents,
+      });
+      itemDoc.quantity = oldQuantity + qty;
+      itemDoc.costPriceCents = newAverageCostCents;
+      await itemDoc.save({ session });
       sale.items[index].returnedQuantity = (line.returnedQuantity || 0) + qty;
     }
 

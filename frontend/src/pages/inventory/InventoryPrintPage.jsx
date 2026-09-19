@@ -30,7 +30,11 @@ export default function InventoryPrintPage() {
   const history = item.purchaseHistory || [];
   const hasLongHistory = true;
   const pageSize = hasLongHistory ? 'A4' : 'A5';
-  const totalCostValue = (item.batches || []).reduce((sum, b) => sum + b.remainingQuantity * b.unitCostCents / 100, 0);
+  // Stock Value = current quantity x current Weighted Average Cost -- never
+  // a batch/lot-level valuation, per the WAC costing rule (a lot's own
+  // original unitCostCents is historical/traceability data, not today's
+  // inventory value).
+  const totalCostValue = item.quantity * item.costPrice;
 
   return (
     <div>
@@ -97,7 +101,7 @@ export default function InventoryPrintPage() {
               </td>
             </tr>
             <tr className="border-b border-slate-50">
-              <td className="py-1.5 text-slate-400">Cost Price</td>
+              <td className="py-1.5 text-slate-400">Average Cost</td>
               <td className="py-1.5 text-slate-700">{formatCurrency(item.costPrice)}</td>
             </tr>
             <tr className="border-b border-slate-50">
@@ -105,7 +109,7 @@ export default function InventoryPrintPage() {
               <td className="py-1.5 text-slate-700">{formatCurrency(item.sellingPrice)}</td>
             </tr>
             <tr className="border-b border-slate-50">
-              <td className="py-1.5 text-slate-400">Total Cost Value</td>
+              <td className="py-1.5 text-slate-400">Stock Value (Qty × Avg Cost)</td>
               <td className="py-1.5 font-semibold text-slate-800">{formatCurrency(totalCostValue)}</td>
             </tr>
             <tr className="border-b border-slate-50">

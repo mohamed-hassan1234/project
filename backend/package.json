@@ -10,8 +10,8 @@
     "seed:admin": "node src/utils/seedAdmin.js",
     "migrate:inventory": "node src/utils/runMigrateInventory.js",
     "migrate:dayclose": "node src/utils/runMigrateDayClose.js",
-    "test": "node --test test/batches.test.js test/quotations.test.js test/saleLinePricing.test.js test/purchasePaymentStatus.test.js",
-    "test:integration": "node --test test/flow.integration.test.js test/quotations.integration.test.js test/returns.integration.test.js test/userPerformance.integration.test.js"
+    "test": "node --test test/batches.test.js test/quotations.test.js test/saleLinePricing.test.js test/purchasePaymentStatus.test.js test/costingService.test.js",
+    "test:integration": "node --test test/flow.integration.test.js test/quotations.integration.test.js test/returns.integration.test.js test/userPerformance.integration.test.js test/wac.integration.test.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

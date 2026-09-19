@@ -50,6 +50,13 @@ export async function consumeReservedBatches(allocations, session) {
   const quantity = allocations.reduce((s, a) => s + a.quantity, 0);
   return { breakdown: allocations, weightedUnitCostCents: Math.round(total / quantity), totalCostCents: total };
 }
+// NOTE on costing: `realizedProfitCents`/`costCents` below are a batch/lot
+// traceability view (how much did THIS SPECIFIC purchase batch yield),
+// deliberately still based on each lot's own original unitCostCents -- they
+// are NOT the authoritative accounting Profit Report, which uses the
+// Weighted Average Cost snapshot frozen on the sale line instead (see
+// reportController.js / dayCloseService.js). Costing method and physical
+// lot/supplier traceability are intentionally separate concerns.
 export async function batchSummary(item, includeActivity = true) {
   const batches = await InventoryLot.find({ item: item._id }).populate('supplier', 'name').populate('purchase', 'purchaseNumber').sort({ createdAt: -1 }).lean();
   const tracked = batches.reduce((s, b) => s + b.remainingQuantity, 0);

@@ -50,9 +50,10 @@ export default function InventoryDetailsModal({ open, onClose, item: summaryItem
       <Row label="Serial Number" value={item.serialNumber || '—'} />
       <Row label="Category" value={item.category?.name || 'Uncategorized'} />
       <Row label="Quantity" value={`${item.quantity} ${item.unit}`} />
-      <Row label="Cost Price" value={formatCurrency(item.costPrice)} />
+      <Row label="Average Cost" value={formatCurrency(item.costPrice)} />
       <Row label="Selling Price" value={formatCurrency(item.sellingPrice)} />
       <Row label="Margin" value={formatCurrency(item.sellingPrice - item.costPrice)} />
+      <Row label="Stock Value (Qty × Avg Cost)" value={formatCurrency(item.quantity * item.costPrice)} />
       <Row label="Supplier" value={item.supplier?.name || '—'} />
       <Row label="Expiry Date" value={item.expiryDate ? formatDate(item.expiryDate) : '—'} />
       <Row label="Created" value={formatDate(item.createdAt)} />

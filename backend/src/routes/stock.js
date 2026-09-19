@@ -10,6 +10,7 @@ import InventoryLot from '../models/InventoryLot.js';
 import StockEntry from '../models/StockEntry.js';
 import Supplier from '../models/Supplier.js';
 import { ensureLegacyLots } from '../services/batchService.js';
+import { calculateWeightedAverageCost } from '../services/costingService.js';
 const router = Router();
 router.use(requireAuth);
 router.use(requirePermission('stock'));
@@ -45,10 +46,31 @@ router.post('/', asyncHandler(async (req, res) => {
       const quantity = Number(row.quantity), costPriceCents = toCents(row.costPrice), sellingPriceCents = toCents(row.sellingPrice);
       const expiryDate = row.expiryDate ? new Date(`${row.expiryDate}T23:59:59.999Z`) : null;
       const [batch] = await InventoryLot.create([{ item: item._id, stockEntry: entry._id, stockSerial, supplier: supplier?._id || item.supplier || null, unitCostCents: costPriceCents, sellingPriceCents, expiryDate, originalQuantity: quantity, remainingQuantity: quantity }], { session });
-      item.stockEvents.push({ type: item.quantity === 0 ? 'RESTOCK' : 'RECEIPT', reference: stockSerial, quantityBefore: item.quantity, quantityAfter: item.quantity + quantity });
+      // WAC recalculated here, inside this transaction, from the item's
+      // CURRENT quantity/average -- never from a value read earlier or
+      // computed on the frontend. If another request receives stock for the
+      // same item concurrently, runInTransaction's session.withTransaction
+      // retries this whole callback on write conflict, so this always blends
+      // against the latest committed state (no lost update).
+      const oldQuantity = item.quantity;
+      const oldAverageCostCents = item.costPriceCents;
+      const newAverageCostCents = calculateWeightedAverageCost({
+        oldQuantity,
+        oldAverageCostCents,
+        incomingQuantity: quantity,
+        incomingUnitCostCents: costPriceCents,
+      });
+      item.stockEvents.push({
+        type: item.quantity === 0 ? 'RESTOCK' : 'RECEIPT',
+        reference: stockSerial,
+        quantityBefore: item.quantity,
+        quantityAfter: item.quantity + quantity,
+        averageCostBeforeCents: oldAverageCostCents,
+        averageCostAfterCents: newAverageCostCents,
+      });
       item.quantity += quantity;
       item.sellingPriceCents = sellingPriceCents;
-      item.costPriceCents = costPriceCents;
+      item.costPriceCents = newAverageCostCents;
       if (supplier && !item.supplier) item.supplier = supplier._id;
       await item.save({ session });
       entry.rows.push({ item: item._id, itemName: item.name, batch: batch._id, quantity, costPriceCents, sellingPriceCents, expiryDate });

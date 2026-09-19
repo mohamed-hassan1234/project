@@ -198,17 +198,24 @@ export async function closeDay({ user } = {}) {
 
     const currentDrafts = await Sale.find({ status: 'DRAFT' }).sort({ createdAt: 1 }).session(session);
     for (const sale of currentDrafts) {
-      // 1. Convert reservation into a permanent stock deduction and run
-      // real FIFO consumption so COGS/profit reflect actual purchase cost.
+      // 1. Convert reservation into a permanent stock deduction. Lots are
+      // still consumed oldest/nearest-expiry-first (FEFO) for physical
+      // traceability -- which supplier/purchase/expiry each unit came from
+      // -- but that is now a traceability concern only. The line's
+      // historical accounting cost is the item's Weighted Average Cost (WAC)
+      // at this exact moment, snapshotted here and never touched again: a
+      // normal sale/stock-out does not change WAC (Phase 12), so this
+      // invoice's cost/profit stays correct forever even after later
+      // purchases move the item's average cost.
       let costOfGoodsCents = 0;
       for (const line of sale.items) {
         const itemDoc = await InventoryItem.findById(line.item).session(session);
         if (!line.batchReservations?.length) line.batchReservations = await reserveBatches(itemDoc, line.quantity, session);
-        const { breakdown, weightedUnitCostCents } = await consumeReservedBatches(line.batchReservations, session);
+        const { breakdown } = await consumeReservedBatches(line.batchReservations, session);
         await confirmReservation(line.item, line.quantity, session, sale.receiptNumber);
-        line.costPriceCents = weightedUnitCostCents;
-        line.lotConsumption = breakdown;
-        costOfGoodsCents += breakdown.reduce((sum, b) => sum + b.quantity * b.unitCostCents, 0);
+        line.costPriceCents = itemDoc.costPriceCents; // WAC snapshot -- authoritative historical COGS basis
+        line.lotConsumption = breakdown; // lot/expiry/supplier traceability only, no longer the cost basis
+        costOfGoodsCents += line.quantity * itemDoc.costPriceCents;
       }
 
       const profitCents = sale.totalCents - costOfGoodsCents;

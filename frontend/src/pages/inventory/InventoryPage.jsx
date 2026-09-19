@@ -138,7 +138,8 @@ export default function InventoryPage() {
             <Th>Category</Th>
             <Th>Supplier</Th>
             <Th>Quantity</Th>
-            <Th>Cost / Sell</Th>
+            <Th>Avg Cost / Sell</Th>
+            <Th>Total Value</Th>
             <Th>Status</Th>
             <Th>Expiry</Th>
             <Th>Created</Th>
@@ -147,9 +148,9 @@ export default function InventoryPage() {
         </THead>
         <TBody>
           {loading ? (
-            <TableLoading colSpan={11} />
+            <TableLoading colSpan={12} />
           ) : items.length === 0 ? (
-            <TableEmpty colSpan={11} message="No inventory items found. Try adjusting your filters or add a new item." />
+            <TableEmpty colSpan={12} message="No inventory items found. Try adjusting your filters or add a new item." />
           ) : (
             items.map((item) => {
               const stock = stockStatusBadge(item.stockStatus);
@@ -173,6 +174,7 @@ export default function InventoryPage() {
                     {' / '}
                     <span className="font-medium">{formatCurrency(item.sellingPrice)}</span>
                   </Td>
+                  <Td className="tabular-nums font-medium text-slate-700">{formatCurrency(item.quantity * item.costPrice)}</Td>
                   <Td>
                     <Badge color={stock.color}>{stock.label}</Badge>
                   </Td>

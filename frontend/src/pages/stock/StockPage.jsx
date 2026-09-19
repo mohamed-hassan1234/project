@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 
 import { Link, useSearchParams } from 'react-router-dom';
 
@@ -15,6 +15,8 @@ import logo from '../../images/logo.png';
 import { printPage } from '../../utils/print.js';
 
 import { formatCurrency, formatDateTime } from '../../utils/format.js';
+
+import { previewWeightedAverageCost } from '../../utils/wac.js';
 
 const blank = () => ({ key: crypto.randomUUID(), name: '', itemId: '', quantity: '', costPrice: '', sellingPrice: '', expiryDate: '' });
 
@@ -70,7 +72,7 @@ function ItemInput({ row, update, inputRef }) {
 
   }, [row.name, row.itemId]);
 
-  const choose = item => { update({ itemId: item.id, name: item.name, costPrice: item.costPrice, sellingPrice: item.sellingPrice }); setActive(false); };
+  const choose = item => { update({ itemId: item.id, name: item.name, costPrice: item.costPrice, sellingPrice: item.sellingPrice, currentQuantity: item.quantity, currentAvgCost: item.costPrice }); setActive(false); };
 
   return <div className="relative min-w-60"><input ref={inputRef} className="w-full rounded border p-2" aria-label="Item name" placeholder="Search item..." value={row.name} onFocus={() => setActive(true)} onBlur={() => setActive(false)} onChange={e => { update({ name: e.target.value, itemId: '' }); setActive(true); }} onKeyDown={e => { if (e.key === 'Enter' && active && matches.length) { e.preventDefault(); choose(matches[0]); } }} />
 
@@ -138,7 +140,7 @@ export default function StockPage() {
         <SupplierInput supplierId={supplierId} supplierName={supplierName} onChange={(id, name) => { setSupplierId(id); setSupplierName(name); }} />
       </div>
 
-      <div className="overflow-x-auto rounded-lg border bg-white pb-24"><table className="w-full text-sm"><thead><tr>{['Item', 'Qty', 'Cost', 'Selling', 'Expiry', ''].map((h, i) => <th key={i} className="p-2 text-left">{h}</th>)}</tr></thead><tbody>{rows.map((row, index) => <tr key={row.key}><td className="p-2"><ItemInput row={row} update={changes => update(row.key, changes)} inputRef={el => { refs.current[row.key] = el; }} /></td>{['quantity', 'costPrice', 'sellingPrice', 'expiryDate'].map(field => <td key={field} className="p-2"><input aria-label={`Row ${index + 1} ${field}`} type={field === 'expiryDate' ? 'date' : 'number'} min={field === 'quantity' ? 1 : 0} step={field === 'quantity' ? 1 : '0.01'} className="w-full min-w-24 rounded border p-2" value={row[field]} onChange={e => update(row.key, { [field]: e.target.value })} onKeyDown={e => { if (field === 'expiryDate' && e.key === 'Tab' && !e.shiftKey) { e.preventDefault(); if (index === rows.length - 1) add(); else refs.current[rows[index + 1].key]?.focus(); } }} /></td>)}<td><button aria-label={`Remove row ${index + 1}`} onClick={() => setRows(previous => previous.length === 1 ? [blank()] : previous.filter(r => r.key !== row.key))}>×</button></td></tr>)}</tbody></table></div>
+      <div className="overflow-x-auto rounded-lg border bg-white pb-24"><table className="w-full text-sm"><thead><tr>{['Item', 'Qty', 'Cost', 'Selling', 'Expiry', ''].map((h, i) => <th key={i} className="p-2 text-left">{h}</th>)}</tr></thead><tbody>{rows.map((row, index) => { const preview = row.itemId && row.quantity && row.costPrice !== '' ? previewWeightedAverageCost({ currentQuantity: row.currentQuantity, currentAverageCost: row.currentAvgCost, incomingQuantity: row.quantity, incomingUnitCost: row.costPrice }) : null; return <Fragment key={row.key}><tr><td className="p-2"><ItemInput row={row} update={changes => update(row.key, changes)} inputRef={el => { refs.current[row.key] = el; }} /></td>{['quantity', 'costPrice', 'sellingPrice', 'expiryDate'].map(field => <td key={field} className="p-2"><input aria-label={`Row ${index + 1} ${field}`} type={field === 'expiryDate' ? 'date' : 'number'} min={field === 'quantity' ? 1 : 0} step={field === 'quantity' ? 1 : '0.01'} className="w-full min-w-24 rounded border p-2" value={row[field]} onChange={e => update(row.key, { [field]: e.target.value })} onKeyDown={e => { if (field === 'expiryDate' && e.key === 'Tab' && !e.shiftKey) { e.preventDefault(); if (index === rows.length - 1) add(); else refs.current[rows[index + 1].key]?.focus(); } }} /></td>)}<td><button aria-label={`Remove row ${index + 1}`} onClick={() => setRows(previous => previous.length === 1 ? [blank()] : previous.filter(r => r.key !== row.key))}>×</button></td></tr>{preview && <tr className="bg-indigo-50/60"><td colSpan={6} className="px-2 pb-2 text-xs text-indigo-700">Average Cost-ka {row.name} wuxuu ka beddelmayaa {formatCurrency(preview.currentAverageCost)} una gudbayaa <strong>{formatCurrency(preview.projectedAverageCost)}</strong> (Qty: {preview.currentQuantity} → {preview.projectedQuantity}). Informational only -- confirmed on save.</td></tr>}</Fragment>; })}</tbody></table></div>
 
       <p className="text-xs text-slate-500">Press Tab after Expiry to continue to the next row. Stock Serial: automatically generated on save.</p><div className="flex gap-3"><Button variant="secondary" onClick={add}>+ Add Row</Button><Button onClick={save} loading={saving}>Create Stock</Button></div>
 

@@ -136,8 +136,13 @@ export default function InventoryFormModal({ open, onClose, item, onSaved }) {
         <section>
           <h4 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">Pricing</h4>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <FormField label="Cost Price" required error={errors.costPrice}>
+            <FormField label={item ? 'Average Cost' : 'Cost Price'} required error={errors.costPrice}>
               <Input type="number" step="0.01" min="0" value={form.costPrice} onChange={set('costPrice')} placeholder="0.00" />
+              {item && (
+                <p className="mt-1 text-xs text-slate-400">
+                  System-computed from Stock IN receipts. Editing this directly overrides the computed average.
+                </p>
+              )}
             </FormField>
             <FormField label="Selling Price" required error={errors.sellingPrice}>
               <Input type="number" step="0.01" min="0" value={form.sellingPrice} onChange={set('sellingPrice')} placeholder="0.00" />

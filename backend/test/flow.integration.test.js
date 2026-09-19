@@ -67,7 +67,13 @@ test('purchase, stock, reservations, close-day, expiry, rollback and concurrency
     assert.deepEqual(sale.items[0].batchReservations.map(a => a.quantity), [20, 30]);
     await closeDay({ user });
     const confirmed = await Sale.findById(sale.id);
-    assert.equal(confirmed.costOfGoodsCents, 5600);
+    // Weighted Average Cost, not a FIFO lot blend: after the two receipts
+    // (20@$1.00, then 100@$1.20), the item's WAC is
+    // (20*100 + 100*120) / 120 = 14000/120 = 116.66... -> rounds to 117
+    // cents ($1.17). The sale confirms 50 units at that snapshot:
+    // 50 * 117 = 5850, regardless of which physical lots FEFO happened to
+    // draw from for quantity/expiry purposes.
+    assert.equal(confirmed.costOfGoodsCents, 5850);
     assert.equal((await InventoryItem.findById(item.id)).quantity, 70);
     assert.equal((await InventoryItem.findById(item.id)).reservedQuantity, 0);
     // Close Day now gates on an explicit OPEN/CLOSED business-day state --
