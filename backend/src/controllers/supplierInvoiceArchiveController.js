@@ -43,6 +43,13 @@ export const createArchive = asyncHandler(async (req, res) => {
   if (serialNumber.length > 100) throw new ApiError(400, 'Serial number is too long.');
   if (!Array.isArray(rows) || !rows.length || rows.length > 500) throw new ApiError(400, 'Enter between 1 and 500 rows.');
 
+  // Backend-enforced uniqueness (frontend validation alone is never
+  // sufficient) -- checked up front for a clear message, with the schema's
+  // own unique index (see the model) as the race-condition backstop.
+  const trimmedSerial = serialNumber.trim();
+  const existing = await SupplierInvoiceArchive.findOne({ serialNumber: trimmedSerial });
+  if (existing) throw new ApiError(409, `An archive with serial number "${trimmedSerial}" already exists (${existing.archiveNumber}).`);
+
   let supplier = null;
   if (supplierId) {
     supplier = await Supplier.findById(supplierId);
@@ -65,26 +72,45 @@ export const createArchive = asyncHandler(async (req, res) => {
   });
 
   const archiveNumber = await generateArchiveNumber();
-  const archive = await SupplierInvoiceArchive.create({
-    archiveNumber,
-    serialNumber: serialNumber.trim(),
-    supplier: supplier?._id || null,
-    supplierName: supplier?.name || '',
-    rows: builtRows,
-    grandTotalCents,
-    notes: notes || '',
-    createdBy: req.user?._id,
-  });
+  let archive;
+  try {
+    archive = await SupplierInvoiceArchive.create({
+      archiveNumber,
+      serialNumber: trimmedSerial,
+      supplier: supplier?._id || null,
+      supplierName: supplier?.name || '',
+      rows: builtRows,
+      grandTotalCents,
+      notes: notes || '',
+      createdBy: req.user?._id,
+    });
+  } catch (err) {
+    // Race-condition backstop: two concurrent saves for the same serial can
+    // both pass the pre-check above -- the schema's unique index (once
+    // built, see runMigrateSupplierArchive.js) catches that case here.
+    if (err?.code === 11000) throw new ApiError(409, `An archive with serial number "${trimmedSerial}" already exists.`);
+    throw err;
+  }
 
   res.status(201).json({ success: true, data: toDTO(archive) });
 });
 
-// GET /api/supplier-invoice-archives?serial=... -- primary lookup, by the
-// supplier/shop's own serial number (never today's Inventory prices).
+// GET /api/supplier-invoice-archives?q=...&serial=...&supplier=... -- with
+// no filter at all, returns every archive (paginated, newest first) so the
+// default page can behave like a file browser. `q` is a general live-search
+// box matching either the Shop/Supplier Serial Number or the supplier name
+// (never today's Inventory prices); `serial`/`supplier` (id) remain as
+// narrower filters for backward compatibility with existing call sites.
 export const searchArchives = asyncHandler(async (req, res) => {
   const filter = {};
+  const q = String(req.query.q || '').trim();
   const serial = String(req.query.serial || '').trim();
-  if (serial) filter.serialNumber = { $regex: escapeRegex(serial), $options: 'i' };
+  if (q) {
+    const escaped = escapeRegex(q);
+    filter.$or = [{ serialNumber: { $regex: escaped, $options: 'i' } }, { supplierName: { $regex: escaped, $options: 'i' } }];
+  } else if (serial) {
+    filter.serialNumber = { $regex: escapeRegex(serial), $options: 'i' };
+  }
   if (req.query.supplier) filter.supplier = req.query.supplier;
   const page = Math.max(1, Number(req.query.page) || 1);
   const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 20));

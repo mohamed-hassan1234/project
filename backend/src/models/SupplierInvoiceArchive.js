@@ -32,10 +32,17 @@ const schema = new mongoose.Schema(
     notes: { type: String, default: '', maxlength: 2000 },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   },
-  { timestamps: true }
+  // autoIndex is disabled here on purpose, same reasoning as
+  // InventoryItem's itemCode/serialNumber: the serialNumber unique index
+  // must only be built AFTER confirming no pre-existing archives already
+  // share a serial (see utils/runMigrateSupplierArchive.js) -- otherwise
+  // the index build itself would fail outright on a database that already
+  // has duplicates. Run that migration once before relying on this
+  // uniqueness being enforced.
+  { timestamps: true, autoIndex: false }
 );
 
-schema.index({ serialNumber: 1 });
+schema.index({ serialNumber: 1 }, { unique: true });
 schema.index({ supplier: 1, createdAt: -1 });
 
 export default mongoose.model('SupplierInvoiceArchive', schema);

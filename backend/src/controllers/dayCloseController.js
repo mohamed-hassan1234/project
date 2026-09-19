@@ -1,7 +1,7 @@
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { fromCents } from '../utils/money.js';
 import { logAudit } from '../services/auditService.js';
-import { buildDayClosePreview, closeDay, getDayCloseHistory, getBusinessDayStatus, openDay } from '../services/dayCloseService.js';
+import { buildDayClosePreview, closeDay, getDayCloseHistory, getBusinessDayStatus, openDay, reopenDayClose } from '../services/dayCloseService.js';
 import { saleToDTO } from './saleController.js';
 
 function businessDayDTO(bd) {
@@ -15,7 +15,7 @@ function businessDayDTO(bd) {
   };
 }
 
-function dayCloseDTO(d) {
+function dayCloseDTO(d, { canReopen = false } = {}) {
   return {
     id: d._id,
     businessDate: d.businessDate,
@@ -41,6 +41,21 @@ function dayCloseDTO(d) {
     openedAt: d.openedAt,
     closedByName: d.closedByName,
     closedAt: d.closedAt,
+    reopened: !!d.reopened,
+    reopenedAt: d.reopenedAt || null,
+    reopenedByName: d.reopenedByName || '',
+    reopenReason: d.reopenReason || '',
+    restoredAccounts: (d.restoredAccounts || []).map((a) => ({
+      account: a.account,
+      accountName: a.accountName,
+      balanceBeforeReopen: fromCents(a.balanceBeforeReopenCents),
+      balanceAfterReopen: fromCents(a.balanceAfterReopenCents),
+    })),
+    // Only the single most recent CLOSED close (BusinessDay.lastDayClose)
+    // can ever be reopened -- see reopenDayClose's date-safety invariant.
+    // Computed server-side so the frontend never has to (and can't
+    // mistakenly) infer this on its own.
+    canReopen,
   };
 }
 
@@ -109,5 +124,29 @@ export const openDayHandler = asyncHandler(async (req, res) => {
 // GET /api/day-close/history
 export const listHistory = asyncHandler(async (req, res) => {
   const { items, pagination } = await getDayCloseHistory(req.query);
-  res.json({ success: true, data: items.map(dayCloseDTO), pagination });
+  const businessDay = await getBusinessDayStatus();
+  const reopenableId = businessDay.status === 'CLOSED' ? String(businessDay.lastDayClose || '') : null;
+  res.json({
+    success: true,
+    data: items.map((d) => dayCloseDTO(d, { canReopen: !d.reopened && reopenableId === String(d._id) })),
+    pagination,
+  });
+});
+
+// POST /api/day-close/:id/reopen -- admin-only, reverses one Close Day using
+// its own saved account snapshot. Route already restricts to admin; the
+// service layer independently re-derives and enforces the same rule.
+export const reopenDayCloseHandler = asyncHandler(async (req, res) => {
+  const { reason = '' } = req.body;
+  const dayClose = await reopenDayClose({ dayCloseId: req.params.id, user: req.user, reason });
+
+  await logAudit({
+    user: req.user,
+    action: 'dayclose.reopen',
+    entityType: 'DayClose',
+    entityId: dayClose._id,
+    details: { reason, restoredAccounts: dayClose.restoredAccounts.length },
+  });
+
+  res.json({ success: true, data: dayCloseDTO(dayClose, { canReopen: false }) });
 });

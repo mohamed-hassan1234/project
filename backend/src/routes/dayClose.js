@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { requireAuth, requireRole, requirePermission } from '../middleware/auth.js';
-import { getPreview, confirmClose, listHistory, getStatus, openDayHandler } from '../controllers/dayCloseController.js';
+import { getPreview, confirmClose, listHistory, getStatus, openDayHandler, reopenDayCloseHandler } from '../controllers/dayCloseController.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -14,5 +14,9 @@ router.get('/history', listHistory);
 // sale/purchase already is. Open Day is admin-only per spec.
 router.post('/confirm', requireRole('admin', 'manager'), confirmClose);
 router.post('/open', requireRole('admin'), openDayHandler);
+// Reopening a specific past close is the same accounting-sensitive,
+// admin-only action as Open Day -- reverses one closing's account resets
+// using its own saved snapshot rather than a blank slate.
+router.post('/:id/reopen', requireRole('admin'), reopenDayCloseHandler);
 
 export default router;

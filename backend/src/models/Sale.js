@@ -11,7 +11,12 @@ const lotConsumptionSchema = new mongoose.Schema(
     lot: { type: mongoose.Schema.Types.ObjectId, ref: 'InventoryLot', required: true },
     supplier: { type: mongoose.Schema.Types.ObjectId, ref: 'Supplier', default: null },
     purchase: { type: mongoose.Schema.Types.ObjectId, ref: 'Purchase', default: null },
-    quantity: { type: Number, required: true, min: 1 },
+    // min: 0, not 1 -- returnSale() decrements an entry's quantity toward 0
+    // in place as its units are returned (rather than removing the entry),
+    // so a FULLY returned line legitimately leaves a 0-quantity entry behind
+    // as the record of "this many units, now all returned, were originally
+    // consumed from this lot."
+    quantity: { type: Number, required: true, min: 0 },
     unitCostCents: { type: Number, required: true, min: 0 },
   },
   { _id: false }

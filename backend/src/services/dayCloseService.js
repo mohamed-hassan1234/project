@@ -380,3 +380,98 @@ export async function getDayCloseHistory({ page = 1, limit = 20 } = {}) {
   ]);
   return { items, pagination: { page: pageNum, limit: limitNum, total, pages: Math.ceil(total / limitNum) } };
 }
+
+// Admin-only: reverses a Close Day by restoring every account it reset back
+// to its pre-close balance, using ONE auditable ADJUSTMENT transaction per
+// account (never a raw balance overwrite), then flips the business day back
+// to OPEN. The original DayClose document is never deleted or rewritten --
+// this only appends a reopen audit trail onto it (reopened/reopenedAt/
+// reopenedBy/reopenReason/restoredAccounts) so its original closing figures
+// remain permanently traceable. If the day is closed again afterward, a
+// brand-new DayClose document is created as usual by closeDay(), preserving
+// this one's full history untouched.
+//
+// Date-safety invariant (spec 1.9): since BusinessDay is a single global
+// singleton (only one business day can ever be "current"), only the close
+// referenced by BusinessDay.lastDayClose -- i.e. the most recent one -- may
+// ever be reopened. Reopening an older, already-superseded historical
+// DayClose is rejected outright: there is no such thing as "reopening an
+// old date while a different day is open" in this architecture, and this
+// guard is what prevents that dangerous state from ever being reachable.
+export async function reopenDayClose({ dayCloseId, user, reason = '' }) {
+  const result = await runInTransaction(async (session) => {
+    const businessDay = await BusinessDay.findById('current').session(session);
+    if (!businessDay || businessDay.status !== 'CLOSED') {
+      throw new ApiError(409, 'The business day is not closed. There is nothing to reopen.');
+    }
+    if (!businessDay.lastDayClose || String(businessDay.lastDayClose) !== String(dayCloseId)) {
+      throw new ApiError(409, 'Only the most recent Close Day can be reopened. This is an older historical record and reopening it would not reflect the current business day.');
+    }
+
+    const dayClose = await DayClose.findById(dayCloseId).session(session);
+    if (!dayClose) throw new ApiError(404, 'Daily closing record not found.');
+    // Idempotency / double-reopen protection: businessDay.status !== 'CLOSED'
+    // already catches a second concurrent request in practice (the first to
+    // commit flips it to OPEN), but this is a second, explicit guard against
+    // any inconsistency between the two flags.
+    if (dayClose.reopened) throw new ApiError(409, 'This closing has already been reopened.');
+
+    // Snapshot is authoritative -- restore to exactly what
+    // accountBalancesBeforeReset recorded at close time, never recalculated
+    // from today's sales/accounts. The delta posted is
+    // (target - whatever the account holds right now), so this is safe even
+    // if something legitimately moved the account while the day was closed.
+    const restoredAccounts = [];
+    for (const entry of dayClose.accountBalancesBeforeReset) {
+      const account = await Account.findById(entry.account).session(session);
+      if (!account) continue; // account deleted since close -- nothing to restore it onto
+      const targetCents = entry.balanceBeforeResetCents;
+      const balanceBeforeReopenCents = account.currentBalanceCents;
+      const deltaCents = targetCents - balanceBeforeReopenCents;
+      let txn = null;
+      if (deltaCents !== 0) {
+        txn = await postImmediateTransaction(
+          {
+            account,
+            direction: deltaCents > 0 ? 'IN' : 'OUT',
+            type: 'ADJUSTMENT',
+            amountCents: Math.abs(deltaCents),
+            referenceType: 'DayClose',
+            referenceId: dayClose._id,
+            description: `Reopen restoration for the ${dayClose.businessDate.toDateString()} close${reason ? ` (${reason})` : ''}`,
+            createdBy: user,
+          },
+          session
+        );
+      }
+      restoredAccounts.push({
+        account: account._id,
+        accountName: account.name,
+        balanceBeforeReopenCents,
+        balanceAfterReopenCents: targetCents,
+        transaction: txn?._id || null,
+      });
+    }
+
+    dayClose.reopened = true;
+    dayClose.reopenedAt = new Date();
+    dayClose.reopenedBy = user?._id || null;
+    dayClose.reopenedByName = user?.name || 'system';
+    dayClose.reopenReason = reason;
+    dayClose.restoredAccounts = restoredAccounts;
+    await dayClose.save({ session });
+
+    businessDay.status = 'OPEN';
+    businessDay.businessDate = startOfDay();
+    businessDay.openedAt = new Date();
+    businessDay.openedBy = user?._id || null;
+    businessDay.openedByName = user?.name || 'system';
+    // lastDayClose intentionally stays pointing at this same DayClose -- it
+    // is now "reopened", not superseded, until it is closed again.
+    await businessDay.save({ session });
+
+    return dayClose;
+  });
+
+  return result;
+}

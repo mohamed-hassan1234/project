@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "oxlint",
-    "test": "node --test test/posDraft.test.js",
+    "test": "node --test test/posDraft.test.js test/receiptPending.test.js",
     "preview": "vite preview"
   },
   "dependencies": {
